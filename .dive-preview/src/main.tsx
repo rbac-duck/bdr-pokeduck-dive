@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { MotherDuckSDKProvider, useConnectionStatus } from "./md-sdk";
 import { Loader2, AlertCircle } from "lucide-react";
+import "./mock-fixtures";
 import Dive from "./dive";
 
 function ConnectionGate({ children }: { children: React.ReactNode }) {
@@ -22,15 +23,14 @@ function ConnectionGate({ children }: { children: React.ReactNode }) {
 }
 
 const token = import.meta.env.VITE_MOTHERDUCK_TOKEN;
-if (!token) {
-  document.getElementById("root")!.innerHTML =
-    '<p style="padding:2rem;color:red">Missing VITE_MOTHERDUCK_TOKEN in .env</p>';
-} else {
-  createRoot(document.getElementById("root")!).render(
-    <MotherDuckSDKProvider token={token}>
-      <ConnectionGate>
-        <Dive />
-      </ConnectionGate>
-    </MotherDuckSDKProvider>
-  );
-}
+// Mock mode (no token, or VITE_MOCK=1): renders the UI with empty query results for visual work.
+const mock = import.meta.env.VITE_MOCK === "1" || !token || token === "your_token_here";
+if (mock) console.info("[preview] mock mode: queries return no rows, flights are not executed");
+
+createRoot(document.getElementById("root")!).render(
+  <MotherDuckSDKProvider token={token ?? ""} mock={mock}>
+    <ConnectionGate>
+      <Dive />
+    </ConnectionGate>
+  </MotherDuckSDKProvider>
+);
