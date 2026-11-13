@@ -39,17 +39,16 @@ const THEME_UNOVA = {
 };
 const C: any = { ...THEME_UNOVA };
 // typography / shape tokens; mutated by applyTheme() at the top of every render
+// Dives load no external fonts (only sans / serif / mono), so the game theme uses the mono stack
+const FONT_GAME = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
 const UI: any = {
   game: true, solid: true, scale: 1.15, radius: 14, radius2: 8,
-  body: '"Pixelify Sans", "Press Start 2P", ui-monospace, monospace',
-  pixel: '"Pixelify Sans", "Press Start 2P", ui-monospace, monospace',
+  body: FONT_GAME,
+  pixel: FONT_GAME,
   bg: "linear-gradient(180deg, #fafafa 0%, #ececec 100%)",
 };
 const fs = (n: number) => Math.round(n * UI.scale * 2) / 2;
-// Pixelify Sans (OFL), latin subset, embedded: the Dive runtime blocks external fonts/stylesheets.
-const PIXELIFY_WOFF2 = "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";
-const FONT_CSS = `@font-face { font-family: "Pixelify Sans"; font-style: normal; font-weight: 400 700; font-display: block; src: url(data:font/woff2;base64,${PIXELIFY_WOFF2}) format("woff2"); }
-.bdr-root button:active { transform: translateY(1px); }
+const FONT_CSS = `.bdr-root button:active { transform: translateY(1px); }
 .bdr-root select, .bdr-root input, .bdr-root textarea { outline-color: #3878c8; }
 .bdr-root ::selection { background: #3878c8; color: #fff; }
 @keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
@@ -585,7 +584,7 @@ function applyTheme(theme: string, size: string) {
   UI.game = unova; UI.solid = false;
   UI.radius = unova ? 8 : 6; UI.radius2 = unova ? 6 : 4;
   UI.scale = (unova ? 1.2 : 1) * (size === "s" ? 0.92 : size === "l" ? 1.14 : 1);
-  UI.body = unova ? '"Pixelify Sans", "Press Start 2P", ui-monospace, monospace' : "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+  UI.body = unova ? FONT_GAME : "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
   UI.pixel = UI.body;
   UI.bg = unova ? "linear-gradient(180deg, #fafafa 0%, #ececec 100%)" : C.page;
   Object.assign(ctl, makeCtl());
@@ -1875,11 +1874,12 @@ function TrainingShowcase({ bdr, ob }: { bdr: string; ob: boolean }) {
 // so standings can never disagree with the Trainer tab. Nothing here gives XP.
 function summarize(r: any, ob: boolean, quota: number) {
   const sqas = N(r.sqas), meetings = N(r.meetings);
-  const { xp, lv } = xpOf(r, ob);
+  const x = xpOf(r, ob);
+  const { xp, lv } = x;
   const q = Math.max(1, quota);
   const t1 = Math.ceil(q / 3), t2 = Math.ceil((q * 2) / 3);
   const stage = sqas >= t2 ? 2 : sqas >= t1 ? 1 : 0;
-  return { sqas, meetings, xp, lv, stage, shiny: sqas >= q, quota: q };
+  return { sqas, meetings, xp, lv, stage, shiny: sqas >= q, quota: q, x };
 }
 type Summ = ReturnType<typeof summarize>;
 const quotaFor = (rows: any[], qid: string, bdr: string) => {
@@ -1892,16 +1892,6 @@ const elapsedFrac = (q: { start: string; end: string }) => {
   const s = Date.parse(q.start + "T00:00:00Z"), e = Date.parse(q.end + "T23:59:59Z");
   return Math.max(0.01, Math.min(1, (Date.now() - s) / (e - s)));
 };
-function MiniMon({ s, ob, bdr }: { s: Summ | null; ob: boolean; bdr: string }) {
-  if (!s) return <div className="animate-pulse" style={{ width: 40, height: 40, background: C.surfaceAlt, borderRadius: UI.radius2 }} />;
-  const sp = lineFor(bdr, ob)[s.stage];
-  return (
-    <div title={`${sp.name} Lv ${s.lv}${s.shiny ? " ✦ shiny" : ""}`} style={{ background: s.shiny ? "#fff4cf" : GB.d3, borderRadius: UI.radius2, padding: 2, lineHeight: 0 }}>
-      <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} scale={2.25} />
-    </div>
-  );
-}
-
 function useLeagueRow({ b, qtr, quotas, onData }: { b: { id: string; name: string }; qtr: any; quotas: any[]; onData: (id: string, v: any) => void }) {
   const qf = quotaFor(quotas, qtr.id, b.id);
   const gi = useSQLQuery(gameSql(b.id, qtr.start, qtr.end));
@@ -1919,26 +1909,96 @@ function useLeagueRow({ b, qtr, quotas, onData }: { b: { id: string; name: strin
   return { b, qf, si, so, total, att, raw, gateOk, pace, err: gi.isError || go.isError } as any;
 }
 
-function LeaderboardRowView({ b, qtr, quotas, rank, onData }: any) {
+// One creature, centered on its grass pad, with level + today's XP under it
+function LeagueMon({ s, ob, bdr, scale = 4.6, showToday = true }: { s: Summ | null; ob: boolean; bdr: string; scale?: number; showToday?: boolean }) {
+  const box = Math.round(scale * 16);
+  if (!s) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }}>
+        <div style={{ ...STAGE(false), padding: "2px 14px 18px", lineHeight: 0, filter: "brightness(0)", opacity: 0.16 }}>
+          <Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} scale={scale} />
+        </div>
+        <div style={{ fontSize: fs(10.5), fontWeight: 700, color: C.faint }}>???</div>
+        <div style={{ fontSize: fs(9.5), color: C.faint }}>:L?? · ??/?? SQA</div>
+      </div>
+    );
+  }
+  const sp = lineFor(bdr, ob)[s.stage];
+  return (
+    <div title={`${sp.name} Lv ${s.lv}${s.shiny ? " ✦ shiny" : ""}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0, width: "100%" }}>
+      <div style={{ fontSize: fs(9), letterSpacing: 1, color: C.accent }}>{ob ? "◎ OUTBOUND" : "◓ INBOUND"}</div>
+      <div style={{ ...STAGE(s.shiny), padding: "2px 14px 18px", lineHeight: 0, minHeight: box, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+        <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} scale={scale} />
+      </div>
+      <div style={{ fontSize: fs(11), fontWeight: 700, color: "#303030", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sp.name}{s.shiny ? " ✦" : ""}</div>
+      <div style={{ fontSize: fs(9.5), color: C.muted }}>:L{s.lv} · {s.sqas}/{s.quota} SQA</div>
+      {showToday && (
+        <div style={{ width: "100%", maxWidth: 170, marginTop: 3 }}>
+          <ExpBar x={s.x} h={8} />
+          <div style={{ fontSize: fs(9.5), textAlign: "center", marginTop: 2, color: s.x.todayXp ? "#303030" : C.faint, fontWeight: s.x.todayXp ? 700 : 400 }}>+{s.x.todayXp.toLocaleString()} EXP today</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Today's XP split by type, for both creatures combined
+function TodayStrip({ si, so }: { si: Summ | null; so: Summ | null }) {
+  if (!si || !so) return <div style={{ height: 10, border: "2px solid #b8b8b8", borderRadius: 3, background: "repeating-linear-gradient(45deg, #e4e4e4 0 6px, #f4f4f4 6px 12px)", backgroundSize: "24px 100%", animation: "bdrStripe .8s linear infinite" }} />;
+  const today = emptyToday();
+  XP_KINDS.forEach((m) => { today[m.k] = si.x.today[m.k] + so.x.today[m.k]; });
+  const tot = si.x.todayXp + so.x.todayXp;
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
+        <span style={{ fontSize: fs(9.5), letterSpacing: 1, color: C.accent }}>TODAY</span>
+        <b style={{ fontSize: fs(12), color: tot ? "#303030" : C.faint }}>+{tot.toLocaleString()} EXP</b>
+      </div>
+      <div style={{ height: 10, display: "flex", border: "2px solid #484848", borderRadius: 3, overflow: "hidden", background: "#ececec" }}>
+        {XP_KINDS.map((m) => (today[m.k] > 0 ? <div key={m.k} title={`${m.label} +${today[m.k]}`} style={{ width: `${(today[m.k] / Math.max(1, tot)) * 100}%`, background: m.color }} /> : null))}
+      </div>
+      <div style={{ marginTop: 4, minHeight: fs(11) }}>
+        {tot ? <XpLegend x={{ ...si.x, today, todayXp: tot }} size={9} /> : <span style={{ fontSize: fs(9.5), color: C.faint }}>No EXP logged yet today</span>}
+      </div>
+    </div>
+  );
+}
+
+function LeaderboardCard({ b, qtr, quotas, rank, onData }: any) {
   const v = useLeagueRow({ b, qtr, quotas, onData });
   const { qf, si, so, total, att, raw, gateOk, pace } = v;
   const loading = !si || !so;
+  const tr = trainerOf(b.id);
   const paceCol = pace >= 1 ? C.ok : pace >= 0.85 ? C.warn : C.danger;
+  const live = qtr.end >= todayStr();
+  const medal = rank === 1 ? "#e0b030" : rank === 2 ? "#a8b0ba" : rank === 3 ? "#c87840" : "#d0d0d0";
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "28px 96px 1.3fr 1.6fr 0.9fr 1fr 1fr", gap: 10, alignItems: "center", padding: "8px 10px", borderBottom: `1px solid ${C.border}`, borderLeft: `4px solid ${trainerOf(b.id).color}` }}>
-      <div style={{ fontSize: fs(14), fontWeight: 800, color: rank === 1 ? "#e0b030" : C.muted }}>{loading ? "·" : rank}</div>
-      <div style={{ display: "flex", gap: 4 }}><MiniMon s={si} ob={false} bdr={b.id} /><MiniMon s={so} ob bdr={b.id} /></div>
-      <div>
-        <div style={{ fontSize: fs(12.5), fontWeight: 700 }}>{b.name} <span style={{ fontSize: fs(10), fontWeight: 400, color: C.muted }}>· {trainerOf(b.id).cls}</span></div>
-        <div style={{ fontSize: fs(10), color: C.faint }}>{v.err ? "query error" : loading ? "loading…" : `${lineFor(b.id, false)[si.stage].name} Lv${si.lv} · ${lineFor(b.id, true)[so.stage].name} Lv${so.lv}`}</div>
-      </div>
-      <div>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11) }}>
-          <span><b>{loading ? "…" : total}</b> / {qf.total} SQAs{qf.isDefault ? <span style={{ color: C.faint }}> (default quota)</span> : ""}</span>
-          <span style={{ color: C.muted }} title={raw > att ? `Uncapped ${Math.round(raw * 100)}%` : ""}>{loading ? "" : `${Math.round(att * 100)}%${raw > att ? "*" : ""}`}</span>
+    <div style={{ ...PANEL(), padding: 12, borderTop: `6px solid ${tr.color}`, display: "flex", flexDirection: "column", gap: 10, minWidth: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ width: 34, height: 34, borderRadius: 999, background: loading ? "#eee" : medal, border: "2px solid #484848", display: "flex", alignItems: "center", justifyContent: "center",
+          fontSize: fs(14), fontWeight: 800, color: "#303030", flexShrink: 0 }}>{loading ? "·" : rank}</div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: fs(14), fontWeight: 800, color: "#303030", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</div>
+          <div style={{ fontSize: fs(10), color: C.muted }}>{tr.cls}</div>
         </div>
-        <div style={{ height: 6, background: C.surfaceAlt, borderRadius: 3, marginTop: 3 }}>
-          <div style={{ width: `${Math.min(100, att * 100)}%`, height: "100%", borderRadius: 3, background: att >= 1 ? "#e0b030" : C.accent }} />
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: fs(16), fontWeight: 800, color: att >= 1 ? "#c89a10" : "#303030" }} title={raw > att ? `Uncapped ${Math.round(raw * 100)}%` : ""}>{loading ? "…" : `${Math.round(att * 100)}%${raw > att ? "*" : ""}`}</div>
+          <div style={{ fontSize: fs(9.5), color: loading ? C.faint : paceCol }} title="Attainment ÷ share of the quarter elapsed">{loading ? "" : `${Math.round(pace * 100)}% pace`}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, background: "linear-gradient(180deg, #ffffff 0%, #f0f0f0 60%, #e2e2e2 100%)", border: "2px solid #d0d0d0", borderRadius: 6, padding: "8px 4px" }}>
+        <LeagueMon s={si} ob={false} bdr={b.id} showToday={live} />
+        <LeagueMon s={so} ob bdr={b.id} showToday={live} />
+      </div>
+
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11), marginBottom: 3 }}>
+          <span><b>{loading ? "…" : total}</b> / {qf.total} SQAs{qf.isDefault ? <span style={{ color: C.faint }}> (default quota)</span> : ""}</span>
+          <span style={{ color: C.muted }}>{loading ? "" : `${si.meetings + so.meetings} mtgs`}</span>
+        </div>
+        <div style={{ height: 8, background: "#ececec", border: "2px solid #484848", borderRadius: 3, overflow: "hidden" }}>
+          <div style={{ width: `${Math.min(100, att * 100)}%`, height: "100%", background: att >= 1 ? "#e0b030" : "#48c050", transition: "width .6s ease" }} />
         </div>
         {!loading && (
           <div style={{ fontSize: fs(9.5), marginTop: 3, color: gateOk ? C.ok : raw >= 1 ? C.danger : C.faint }}>
@@ -1946,11 +2006,9 @@ function LeaderboardRowView({ b, qtr, quotas, rank, onData }: any) {
           </div>
         )}
       </div>
-      <div style={{ fontSize: fs(11), color: loading ? C.faint : paceCol }} title="Attainment ÷ share of the quarter elapsed">
-        {loading ? "…" : `${Math.round(pace * 100)}% pace`}
-      </div>
-      <div style={{ fontSize: fs(11), color: C.muted }}>IN {loading ? "…" : `${si.sqas}/${qf.inb}`}{si?.shiny ? " ✦" : ""}<br /><span style={{ color: C.faint }}>{si ? `${si.meetings} mtgs` : ""}</span></div>
-      <div style={{ fontSize: fs(11), color: C.muted }}>OUT {loading ? "…" : `${so.sqas}/${qf.ob}`}{so?.shiny ? " ✦" : loading ? "" : " 🔒"}<br /><span style={{ color: C.faint }}>{so ? `${so.meetings} mtgs` : ""}</span></div>
+
+      {live && <TodayStrip si={si} so={so} />}
+      {v.err && <div style={{ fontSize: fs(10), color: C.danger }}>Couldn't load this trainer's numbers.</div>}
     </div>
   );
 }
@@ -1965,19 +2023,7 @@ function HofCard({ bdr, qtr, quotas }: { bdr: string; qtr: any; quotas: any[] })
   const total = (si?.sqas ?? 0) + (so?.sqas ?? 0);
   const cleared = !!si && !!so && total >= qf.total;
   const over = cleared && so!.sqas >= qf.ob && total > qf.total;
-  const Mon = ({ s, ob }: { s: Summ | null; ob: boolean }) => {
-    if (!s) return <div className="animate-pulse" style={{ height: 120, background: GB.d2, opacity: 0.4 }} />;
-    const sp = lineFor(bdr, ob)[s.stage];
-    return (
-      <div style={{ textAlign: "center" }}>
-        <div style={{ display: "inline-block", background: s.shiny ? "#fff4cf" : "transparent", borderRadius: UI.radius2, padding: 2 }}>
-          <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} scale={5} />
-        </div>
-        <div style={{ fontSize: fs(10.5), fontWeight: 800 }}>{sp.name}{s.shiny ? " ✦" : ""}</div>
-        <div style={{ fontSize: fs(9.5) }}>:L{s.lv} · {s.sqas}/{s.quota} SQA</div>
-      </div>
-    );
-  };
+  const Mon = ({ s, ob }: { s: Summ | null; ob: boolean }) => <LeagueMon s={s} ob={ob} bdr={bdr} scale={5} showToday={live} />;
   return (
     <GbBox style={{ opacity: gi.isError || go.isError ? 0.6 : 1, borderTop: `6px solid ${trainerOf(bdr).color}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11), fontWeight: 800, marginBottom: 6 }}>
@@ -2028,11 +2074,8 @@ function LeagueTab() {
       </div>
 
       {view === "board" ? (
-        <div style={{ ...PANEL() }}>
-          <div style={{ display: "grid", gridTemplateColumns: "28px 96px 1.3fr 1.6fr 0.9fr 1fr 1fr", gap: 10, padding: "8px 10px", fontSize: fs(9.5), letterSpacing: 1, color: C.faint, borderBottom: `1px solid ${C.border}` }}>
-            <span>#</span><span>PARTY</span><span>TRAINER</span><span>TOTAL SQAs</span><span>PACE</span><span>INBOUND</span><span>OUTBOUND</span>
-          </div>
-          {order.map((b) => <LeaderboardRowView key={`${qtr.id}-${b.id}`} b={b} qtr={qtr} quotas={quotas} rank={rankOf(b.id)} onData={onData} />)}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
+          {order.map((b) => <LeaderboardCard key={`${qtr.id}-${b.id}`} b={b} qtr={qtr} quotas={quotas} rank={rankOf(b.id)} onData={onData} />)}
         </div>
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 12, textTransform: "uppercase" }}>
