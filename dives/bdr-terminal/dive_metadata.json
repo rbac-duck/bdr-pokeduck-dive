@@ -1,0 +1,15 @@
+{
+  "id": "42b372c2-b7e6-4d8c-bab2-5d7e626b8abb",
+  "title": "BDR Pokeduck",
+  "description": "BDR Gamified Terminal",
+  "requiredResources": [
+    {
+      "url": "md:_share/mdw/8cdbf94d-7075-45a4-bf57-4fd19470e532",
+      "alias": "mdw"
+    },
+    {
+      "url": "md:_share/bdr_terminal_gamified/51f8608a-6641-4fde-8847-b2c6bde9f34e",
+      "alias": "bdr_terminal_gamified"
+    }
+  ]
+}
