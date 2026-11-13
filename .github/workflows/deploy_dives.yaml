@@ -30,6 +30,7 @@ jobs:
           filters: |
             # Register each dive folder here (name must match folder)
             eastlake-sales: dives/eastlake-sales/**
+            bdr-terminal: dives/bdr-terminal/**
 
   deploy:
     name: Deploy Dives

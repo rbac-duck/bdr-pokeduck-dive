@@ -1,0 +1,21 @@
+{
+  "id": "c258178b-dd1b-4cd6-a589-2e8944793085",
+  "name": "bdr_terminal_log_action",
+  "version": 4,
+  "max_runtime_sec": 120,
+  "instance_type": "F4",
+  "access_token_name": "MotherDuck Flights",
+  "config": {
+    "RETOUCH_DAYS": "",
+    "EVENT_ID": "",
+    "BATCH": "",
+    "EVENT_TYPE": "",
+    "CONTACT_ID": "",
+    "AE_ID": "",
+    "ACTOR_BDR_ID": "",
+    "NOTE": "",
+    "PAYLOAD": "",
+    "COMPANY_ID": ""
+  },
+  "secret_names": []
+}
