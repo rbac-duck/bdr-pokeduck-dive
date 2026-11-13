@@ -46,11 +46,16 @@ const UI: any = {
   bg: "linear-gradient(180deg, #fafafa 0%, #ececec 100%)",
 };
 const fs = (n: number) => Math.round(n * UI.scale * 2) / 2;
-const FONT_CSS = `@import url('https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;500;600;700&display=swap');
+// Pixelify Sans (OFL), latin subset, embedded: the Dive runtime blocks external fonts/stylesheets.
+const PIXELIFY_WOFF2 = "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";
+const FONT_CSS = `@font-face { font-family: "Pixelify Sans"; font-style: normal; font-weight: 400 700; font-display: block; src: url(data:font/woff2;base64,${PIXELIFY_WOFF2}) format("woff2"); }
 .bdr-root button:active { transform: translateY(1px); }
 .bdr-root select, .bdr-root input, .bdr-root textarea { outline-color: #3878c8; }
 .bdr-root ::selection { background: #3878c8; color: #fff; }
-@keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }`;
+@keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+@keyframes bdrFloat { 0% { opacity: 0; transform: translate(-50%, 6px) } 15% { opacity: 1 } 100% { opacity: 0; transform: translate(-50%, -34px) } }
+@keyframes bdrStripe { from { background-position: 0 0 } to { background-position: 24px 0 } }
+@keyframes bdrPop { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }`;
 // readable ink on a coloured badge
 const inkOn = (hex: string) => {
   const h = hex.replace("#", "");
@@ -1005,6 +1010,53 @@ const DEFAULT_QUOTA = 60;
 const XP = { sqa: 1000, meeting: 300, connect: 100, call: 2, email: 1, linkedin: 15, hygiene: 5, acctOpen: 20, acctMulti: 75 };
 const CAPS = "calls 60/day · emails 60/day · LinkedIn 30/day · queue hygiene 40/day. Calls include Orum dials; connects = Connected, Interested, Not interested, Booked AE meeting, Bad fit, Intro not made";
 
+// ---- XP math shared by the header showcase, Trainer and League, so they can never disagree ----
+// Today's XP is split by kind so bars can show where it came from.
+const XP_KINDS = [
+  // same buckets as the creature stats (HP meetings, ATK calls, SPC emails, SPD LinkedIn, DEF reviews)
+  { k: "sqa", label: "SQAs", color: "#e8b830" },
+  { k: "meeting", label: "Meetings", color: "#48c050" },
+  { k: "calls", label: "Calls", color: "#e04848" },
+  { k: "emails", label: "Emails", color: "#ff8c3a" },
+  { k: "linkedin", label: "LinkedIn", color: "#0a66c2" },
+  { k: "queue", label: "Reviews", color: "#9a6ad6" },
+  { k: "accounts", label: "Accounts", color: "#1aa39a" },
+] as const;
+type XpKind = (typeof XP_KINDS)[number]["k"];
+const XP_BASE_COLOR = "#8fa3b8"; // EXP earned before today
+const levelOf = (xp: number) => Math.max(1, Math.min(100, Math.floor(Math.cbrt(Math.max(0, xp) + 1e-9))));
+const emptyToday = (): Record<XpKind, number> => ({ sqa: 0, meeting: 0, calls: 0, emails: 0, linkedin: 0, queue: 0, accounts: 0 });
+function finishXp(xp: number, today: Record<XpKind, number>, counts: any) {
+  const todayXp = Object.values(today).reduce((a, b) => a + b, 0);
+  const lv = levelOf(xp);
+  return { xp, lv, lvFloor: lv ** 3, lvNext: (lv + 1) ** 3, today, todayXp, todayCounts: counts, lvStart: levelOf(xp - todayXp) };
+}
+function xpOf(r: any, ob: boolean) {
+  const xp = N(r.sqas) * XP.sqa + N(r.meetings) * XP.meeting + N(r.connects) * XP.connect + N(r.calls_capped) * XP.call +
+    N(r.emails_capped) * XP.email + N(r.linkedin_capped) * XP.linkedin + N(r.hygiene_capped) * XP.hygiene +
+    (ob ? N(r.accts_opened) * XP.acctOpen + N(r.accts_multi) * XP.acctMulti : 0);
+  const c = {
+    sqas: N(r.sqas_today), meetings: N(r.meetings_today), emails: Math.min(N(r.emails_today), 60), calls: Math.min(N(r.calls_today), 60),
+    connects: N(r.connects_today), linkedin: Math.min(N(r.linkedin_today), 30), queue: Math.min(N(r.hygiene_today), 40),
+    opened: ob ? N(r.accts_opened_today) : 0, multi: ob ? N(r.accts_multi_today) : 0,
+  };
+  const today: Record<XpKind, number> = {
+    sqa: c.sqas * XP.sqa, meeting: c.meetings * XP.meeting,
+    calls: c.calls * XP.call + c.connects * XP.connect, emails: c.emails * XP.email,
+    linkedin: c.linkedin * XP.linkedin, queue: c.queue * XP.hygiene, accounts: c.opened * XP.acctOpen + c.multi * XP.acctMulti,
+  };
+  return finishXp(xp, today, c);
+}
+type XpInfo = ReturnType<typeof xpOf>;
+// Terminal clicks that earn XP (credited optimistically until the ledger catches up)
+const xpForEvent = (t: string, ob: boolean): [XpKind, number] | null =>
+  t.startsWith("linkedin_") ? ["linkedin", XP.linkedin]
+    : ["reviewed", "retouch_set", "retouch_clear", "note"].includes(t) || (ob && t === "ae_assign") ? ["queue", XP.hygiene] : null;
+const currentQuarter = () => {
+  const d = todayStr();
+  return QUARTERS.find((q) => q.start <= d && d <= q.end) ?? QUARTERS[0];
+};
+
 const SPECIES = [
   { name: "PEEPBIT", map: SPRITE_PEEP, base: { hp: 45, atk: 49, def: 49, spd: 45, spc: 65 }, flavor: "Hatches every quarter. Chirps at anything that signs up." },
   { name: "QUACKRAFT", map: SPRITE_QUACK, base: { hp: 60, atk: 62, def: 63, spd: 60, spc: 80 }, flavor: "Has learned that a follow-up is worth ten first touches." },
@@ -1281,23 +1333,23 @@ type CLine = { name: string; map: string[]; base: any; flavor: string }[];
 const mkLine = (names: string[], flavors: string[]): CLine => names.map((n, i) => ({ name: n, map: CREATURE_MAPS[n], base: SPECIES[i].base, flavor: flavors[i] }));
 const pal4 = (a: string[]) => ({ d0: a[0], d1: a[1], d2: a[2], d3: a[3] });
 const TRAINERS: Record<string, { cls: string; type: string; obType: string; color: string; line: CLine; obLine: CLine; inPal: any; obPal: any }> = {
-  "89400804": { cls: "Blaze Ace", type: "Fire", color: "#e8603c",
+  "89400804": { cls: "Team Red", type: "Fire", color: "#e8603c",
     line: mkLine(["KINDLIT", "BLAZETAIL", "PYRALYNX"], ["Its tail flickers brighter every time a trial signs up.", "Turns a cold lead warm with a single follow-up.", "Leaves a trail of booked meetings wherever it hunts."]),
     inPal: pal4(["#3a2020", "#ffb030", "#e8603c", "#ffe2c0"]), obType: "Fire", obLine: mkLine(["CINDUCK", "BLAZEDRAKE", "PHOENIDRAKE"], ["Waddles into cold accounts and warms them right up.", "Its first email lands like a spark in dry grass.", "Revives closed-lost accounts from the ashes."]),
     obPal: pal4(["#3a2020", "#ffa424", "#d8503a", "#ffd6a0"]) },
-  "95672339": { cls: "Team Silver Admin", type: "Dark", color: "#7d8691",
+  "95672339": { cls: "Team Silver", type: "Dark", color: "#7d8691",
     line: mkLine(["HOOTLET", "DUSKOWL", "NOCTURNEX"], ["Sees every reply, even the ones sent at 2 a.m.", "Hunts silently through the inbox after dark.", "Team Silver's sharpest eyes. No lead escapes its gaze."]),
     inPal: pal4(["#1e1f24", "#e6c34a", "#4a4e57", "#a8b0ba"]), obType: "Dark", obLine: mkLine(["SHADLET", "NIGHTDRAKE", "ECLIPSDRAKE"], ["Slips past gatekeepers unnoticed.", "Strikes from the shadows with a perfectly timed bump.", "Team Silver's outbound specialist. Its sequences never miss."]),
     obPal: pal4(["#1a1b20", "#e6c34a", "#3c4048", "#9aa3ad"]) },
-  "95288851": { cls: "Dragon Tamer", type: "Water/Dragon", color: "#2f6fd6",
+  "95288851": { cls: "Team Blue", type: "Water/Dragon", color: "#2f6fd6",
     line: mkLine(["DRIZZLET", "TIDEWYRM", "SKYLEVIATH"], ["Splashes into new trials before anyone else notices.", "Its cadence rises and falls like the tide.", "Said to calm even the stormiest prospect."]),
     inPal: pal4(["#14304f", "#f6efd6", "#2f6fd6", "#8fc4ff"]), obType: "Flying", obLine: mkLine(["BREEZLET", "GALEDRAKE", "STORMWING"], ["Scouts new accounts from high above.", "Rides the outbound winds from one territory to the next.", "Can multi-thread an entire org in a single flight."]),
     obPal: pal4(["#14304f", "#ffc04a", "#4a86e8", "#e8f2ff"]) },
-  "102299028": { cls: "Spark Rookie", type: "Electric", color: "#e0b400",
+  "102299028": { cls: "Team Yellow", type: "Electric", color: "#e0b400",
     line: mkLine(["ZAPPIP", "VOLTWICK", "THUNDRAKE"], ["Buzzes with first-quarter energy.", "Its glow lights up the darkest backlog.", "Strikes the same account twice: once by email, once by phone."]),
     inPal: pal4(["#3a2e05", "#7ae7ff", "#f2a900", "#ffe14a"]), obType: "Electric", obLine: mkLine(["ZAPLING", "AMPDRAKE", "TESLADRAKE"], ["Fizzes with energy on every cold call.", "Its dials crackle with momentum.", "Powers through a full call block without slowing down."]),
     obPal: pal4(["#3a2e05", "#ff8a1f", "#f2a900", "#ffe14a"]) },
-  "96069408": { cls: "Mystic", type: "Psychic", color: "#8a55d0",
+  "96069408": { cls: "Team Purple", type: "Psychic", color: "#8a55d0",
     line: mkLine(["LILMYST", "VIOLOOM", "AMETHORA"], ["Senses a hand-raiser before the form is submitted.", "Its petals pick up hidden buying signals.", "Reads every account like a crystal ball."]),
     inPal: pal4(["#2c1840", "#ffb8e6", "#7b4bc4", "#c8a6f2"]), obType: "Psychic", obLine: mkLine(["MUSELET", "MYSTDRAKE", "ASTRALDRAKE"], ["Somehow knows who will reply before they do.", "Its stare finds the champion in any org chart.", "Sees the whole buying committee at once."]),
     obPal: pal4(["#2c1840", "#ff7ad0", "#7b4bc4", "#d8c2f6"]) },
@@ -1466,8 +1518,7 @@ function TrainerTab({ defaultTrainer }: { defaultTrainer: string }) {
 }
 
 function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boolean; quota: number }) {
-  const g = useSQLQuery(ob ? obGameSql(tid, qtr.start, qtr.end) : gameSql(tid, qtr.start, qtr.end));
-  const r: any = (Array.isArray(g.data) ? g.data[0] : null) ?? {};
+  const { g, r, x } = useTrainingXp(tid, ob, qtr);
 
   const sqas = N(r.sqas), meetings = N(r.meetings), connects = N(r.connects);
   const callsC = N(r.calls_capped), emailsC = N(r.emails_capped), liC = N(r.linkedin_capped), hygC = N(r.hygiene_capped);
@@ -1481,13 +1532,7 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
     { k: ob ? "Hygiene + AE assigns (capped)" : "Queue hygiene (capped)", n: hygC, w: XP.hygiene },
     ...(ob ? [{ k: "Accounts opened", n: N(r.accts_opened), w: XP.acctOpen }, { k: "Accounts multi-threaded (3+)", n: N(r.accts_multi), w: XP.acctMulti }] : []),
   ];
-  const xp = parts.reduce((a, p) => a + p.n * p.w, 0);
-  const todayXp = N(r.sqas_today) * XP.sqa + N(r.meetings_today) * XP.meeting + N(r.connects_today) * XP.connect +
-    Math.min(N(r.calls_today), 60) * XP.call + Math.min(N(r.emails_today), 60) * XP.email +
-    Math.min(N(r.linkedin_today), 30) * XP.linkedin + Math.min(N(r.hygiene_today), 40) * XP.hygiene +
-    (ob ? N(r.accts_opened_today) * XP.acctOpen + N(r.accts_multi_today) * XP.acctMulti : 0);
-  const lv = Math.max(1, Math.min(100, Math.floor(Math.cbrt(xp + 1e-9))));
-  const lvFloor = lv ** 3, lvNext = (lv + 1) ** 3;
+  const { xp, lv, lvFloor, lvNext, todayXp } = x;
   const t1 = Math.ceil(quota / 3), t2 = Math.ceil((quota * 2) / 3);
   const stage = sqas >= t2 ? 2 : sqas >= t1 ? 1 : 0;
   const shiny = sqas >= quota;
@@ -1530,7 +1575,7 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
                 </div>
                 <div style={{ fontSize: fs(11), textAlign: "right", marginTop: 2 }}>{sqas}/ {quota}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(10), marginTop: 6 }}>
-                  <b style={UI.game ? { background: "#e8b830", padding: "0 5px", borderRadius: 3, border: "1px solid #484848" } : {}}>EXP</b><div style={{ flex: 1 }}><Bar pct={((xp - lvFloor) / (lvNext - lvFloor)) * 100} color={UI.game ? "#48a0f0" : "#3a6ea5"} bg={UI.game ? "#f2f2f2" : GB.d2} h={UI.game ? 5 : 4} /></div>
+                  <b style={UI.game ? { background: "#e8b830", padding: "0 5px", borderRadius: 3, border: "1px solid #484848" } : {}}>EXP</b><div style={{ flex: 1 }}>{UI.game ? <ExpBar x={x} h={9} /> : <Bar pct={((xp - lvFloor) / (lvNext - lvFloor)) * 100} color="#3a6ea5" bg={GB.d2} />}</div>
                 </div>
                 <div style={{ fontSize: fs(9.5), textAlign: "right", marginTop: 2 }}>{Math.round(lvNext - xp).toLocaleString()} TO :L{lv + 1}</div>
               </div>
@@ -1563,6 +1608,8 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
           </>)}
         </GbBox>
 
+        {UI.game && !loading && <TodayLedger x={x} ob={ob} />}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <GbBox>
             <div style={{ fontSize: fs(11), fontWeight: 800, marginBottom: 6 }}>STATS</div>
@@ -1575,13 +1622,17 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
           </GbBox>
           <GbBox>
             <div style={{ fontSize: fs(11), fontWeight: 800, marginBottom: 6 }}>MOVES</div>
-            {current4.map((m) => (
+            {loading ? [0, 1, 2, 3].map((i) => (
+              <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11), padding: "2px 0", opacity: 0.4 }}>
+                <span>- - - -</span><span style={{ fontSize: fs(9) }}>???</span>
+              </div>
+            )) : current4.map((m) => (
               <div key={m.name} style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11), padding: "2px 0" }}>
                 <span>{m.name}</span><span style={{ fontSize: fs(9) }}>{m.type}</span>
               </div>
             ))}
             <div style={{ fontSize: fs(9), marginTop: 6, textTransform: "none" }}>
-              {learned.length} of {MV.length} learned{nextMove ? ` · next: ${nextMove.name} at Lv ${nextMove.lv}` : " · move set complete"}
+              {loading ? "Loading moves…" : `${learned.length} of ${MV.length} learned${nextMove ? ` · next: ${nextMove.name} at Lv ${nextMove.lv}` : " · move set complete"}`}
             </div>
           </GbBox>
           <div style={{ gridColumn: "1 / -1", ...PANEL(), padding: 10, textTransform: "none" }}>
@@ -1604,16 +1655,227 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
 }
 
 // =====================================================================
+// ======================  TRAINING (XP) WIDGETS  =======================
+// =====================================================================
+// Live XP for one creature: server numbers from the game SQL, plus clicks logged
+// in this session that the ledger hasn't caught up on yet (the share lags ~1 min).
+function useTrainingXp(bdr: string, ob: boolean, qtr: { start: string; end: string }) {
+  const g = useSQLQuery(ob ? obGameSql(bdr, qtr.start, qtr.end) : gameSql(bdr, qtr.start, qtr.end));
+  const r: any = (Array.isArray(g.data) ? g.data[0] : null) ?? {};
+  const base = xpOf(r, ob);
+  const [pend, setPend] = useState<{ kind: XpKind; xp: number; t: number }[]>([]);
+  const seenToday = useRef(base.todayXp);
+  const refetch = useRef(g.refetch);
+  refetch.current = g.refetch;
+  // once the server shows XP we were holding optimistically, drop those pending entries
+  useEffect(() => {
+    let gained = base.todayXp - seenToday.current;
+    seenToday.current = base.todayXp;
+    if (gained <= 0) return;
+    setPend((p) => p.filter((it) => { if (gained >= it.xp) { gained -= it.xp; return false; } return true; }));
+  }, [base.todayXp]);
+  useEffect(() => {
+    const onGain = (e: any) => {
+      const d = e.detail || {};
+      if (d.bdr !== bdr || !!d.ob !== ob) return;
+      setPend((p) => [...p, { kind: d.kind, xp: d.xp, t: Date.now() }]);
+    };
+    const timers: any[] = [];
+    const onSaved = (e: any) => {
+      if (e.detail?.bdr !== bdr) return;
+      [30000, 75000].forEach((ms) => timers.push(setTimeout(() => refetch.current(), ms)));
+    };
+    const expire = setInterval(() => setPend((p) => (p.length ? p.filter((it) => Date.now() - it.t < 180000) : p)), 20000);
+    window.addEventListener("bdr-xp-gain", onGain);
+    window.addEventListener("bdr-xp-saved", onSaved);
+    return () => {
+      window.removeEventListener("bdr-xp-gain", onGain);
+      window.removeEventListener("bdr-xp-saved", onSaved);
+      clearInterval(expire); timers.forEach(clearTimeout);
+    };
+  }, [bdr, ob]);
+  let x: XpInfo = base;
+  if (pend.length) {
+    const today = { ...base.today };
+    let add = 0;
+    pend.forEach((it) => { today[it.kind] += it.xp; add += it.xp; });
+    x = finishXp(base.xp + add, today, base.todayCounts);
+  }
+  return { g, r, x, pendingN: pend.length };
+}
+
+// EXP bar for the current level: slate = earned before today, colors = today's XP by kind
+function ExpBar({ x, h = 10 }: { x: XpInfo; h?: number }) {
+  const span = Math.max(1, x.lvNext - x.lvFloor);
+  const inLevel = Math.max(0, x.xp - x.lvFloor);
+  const todayInLevel = Math.min(x.todayXp, inLevel); // leveled up today → the whole bar is today's work
+  const k = x.todayXp > 0 ? todayInLevel / x.todayXp : 0;
+  const tip = XP_KINDS.filter((m) => x.today[m.k] > 0).map((m) => `${m.label} +${x.today[m.k].toLocaleString()}`).join(" · ");
+  return (
+    <div title={tip ? `Today: ${tip}` : "No EXP yet today"} style={{ height: h, background: "#ececec", border: "2px solid #484848", borderRadius: 3, display: "flex", overflow: "hidden" }}>
+      <div style={{ width: `${((inLevel - todayInLevel) / span) * 100}%`, background: XP_BASE_COLOR, transition: "width .6s ease" }} />
+      {XP_KINDS.map((m) => {
+        const v = x.today[m.k] * k;
+        return v > 0 ? <div key={m.k} style={{ width: `${(v / span) * 100}%`, background: m.color, boxShadow: "inset 0 -2px 0 rgba(0,0,0,.2)", transition: "width .6s ease" }} /> : null;
+      })}
+    </div>
+  );
+}
+
+function XpLegend({ x, size = 10 }: { x: XpInfo; size?: number }) {
+  const on = XP_KINDS.filter((m) => x.today[m.k] > 0);
+  if (!on.length) return null;
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: fs(size) }}>
+      {on.map((m) => (
+        <span key={m.k} style={{ display: "inline-flex", alignItems: "center", gap: 3, color: "#484848" }}>
+          <span style={{ width: 8, height: 8, background: m.color, border: "1px solid #484848", display: "inline-block" }} />
+          {m.label} <b style={{ color: m.color }}>+{x.today[m.k].toLocaleString()}</b>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// Daily totals on the Trainer tab
+function TodayLedger({ x, ob }: { x: XpInfo; ob: boolean }) {
+  const c = x.todayCounts;
+  const rows: { k: XpKind; detail: string }[] = [
+    { k: "sqa", detail: `${c.sqas} SQA${c.sqas === 1 ? "" : "s"}` },
+    { k: "meeting", detail: `${c.meetings} meeting${c.meetings === 1 ? "" : "s"} booked` },
+    { k: "calls", detail: `${c.calls} dial${c.calls === 1 ? "" : "s"} · ${c.connects} connect${c.connects === 1 ? "" : "s"}` },
+    { k: "emails", detail: `${c.emails} email${c.emails === 1 ? "" : "s"} sent` },
+    { k: "linkedin", detail: `${c.linkedin} touch${c.linkedin === 1 ? "" : "es"}` },
+    { k: "queue", detail: `${c.queue} reviewed / retouch / notes${ob ? " / AE assigns" : ""}` },
+    ...(ob ? [{ k: "accounts" as XpKind, detail: `${c.opened} opened · ${c.multi} multi-threaded` }] : []),
+  ];
+  const tot = Math.max(1, x.todayXp);
+  return (
+    <div style={{ ...PANEL(), padding: 10, textTransform: "none" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+        <span style={{ fontSize: fs(10), letterSpacing: 1, color: C.accent }}>// TODAY'S TRAINING</span>
+        <b style={{ fontSize: fs(13), color: x.todayXp ? C.text : C.faint }}>+{x.todayXp.toLocaleString()} EXP</b>
+      </div>
+      <div style={{ height: 12, display: "flex", border: "2px solid #484848", borderRadius: 3, overflow: "hidden", background: "#ececec", marginBottom: 8 }}>
+        {XP_KINDS.map((m) => (x.today[m.k] > 0
+          ? <div key={m.k} title={`${m.label} +${x.today[m.k]}`} style={{ width: `${(x.today[m.k] / tot) * 100}%`, background: m.color, transition: "width .6s ease" }} />
+          : null))}
+      </div>
+      {rows.map((row) => {
+        const m = XP_KINDS.find((z) => z.k === row.k)!;
+        const v = x.today[row.k];
+        return (
+          <div key={row.k} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: fs(11), padding: "2px 0", opacity: v ? 1 : 0.45 }}>
+            <span style={{ width: 10, height: 10, background: m.color, border: "1px solid #484848", flexShrink: 0 }} />
+            <span style={{ width: 92, flexShrink: 0, color: C.text }}>{m.label}</span>
+            <span style={{ flex: 1, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.detail}</span>
+            <b style={{ color: v ? m.color : C.faint, fontVariantNumeric: "tabular-nums" }}>+{v.toLocaleString()}</b>
+          </div>
+        );
+      })}
+      <div style={{ fontSize: fs(9.5), color: C.faint, marginTop: 4 }}>Today = calendar day (UTC). Calls, emails and meetings sync from HubSpot ~every 4h; LinkedIn + reviews show up as you log them.</div>
+    </div>
+  );
+}
+
+// One creature in the header: sprite on its grass pad, level, EXP bar, today's gains
+function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: any; quota: number }) {
+  const { g, r, x } = useTrainingXp(bdr, ob, qtr);
+  const sqas = N(r.sqas);
+  const q = Math.max(1, quota);
+  const t1 = Math.ceil(q / 3), t2 = Math.ceil((q * 2) / 3);
+  const stage = sqas >= t2 ? 2 : sqas >= t1 ? 1 : 0;
+  const shiny = sqas >= q;
+  const sp = lineFor(bdr, ob)[stage];
+  // "+EXP" pop-ups and a LEVEL UP flash when XP rises during the session
+  const [floats, setFloats] = useState<{ id: number; amt: number; color: string }[]>([]);
+  const [flash, setFlash] = useState(false);
+  const prev = useRef<XpInfo | null>(null);
+  const loaded = Array.isArray(g.data);
+  useEffect(() => {
+    if (!loaded) return; // first load is not a "gain"
+    const p = prev.current;
+    prev.current = x;
+    if (!p || x.xp <= p.xp) return;
+    let best: XpKind = "queue", bestD = 0;
+    XP_KINDS.forEach((m) => { const d = x.today[m.k] - p.today[m.k]; if (d > bestD) { bestD = d; best = m.k; } });
+    const id = Date.now() + Math.random();
+    const color = XP_KINDS.find((m) => m.k === best)!.color;
+    setFloats((f) => [...f, { id, amt: Math.round(x.xp - p.xp), color }]);
+    setTimeout(() => setFloats((f) => f.filter((z) => z.id !== id)), 1700);
+    if (x.lv > p.lv) { setFlash(true); setTimeout(() => setFlash(false), 2600); }
+  }, [x.xp, loaded]);
+  const lvUpsToday = x.lv - x.lvStart;
+  return (
+    <div style={{ ...PANEL(), flex: "1 1 330px", minWidth: 0, display: "flex", alignItems: "center", gap: 10, padding: "6px 14px 6px 6px", position: "relative" }}>
+      <div style={{ ...STAGE(shiny), padding: "2px 12px 16px", lineHeight: 0, position: "relative", animation: flash ? "bdrPop .5s steps(4) 3" : undefined }}>
+        {loaded ? <Sprite map={sp.map} pal={palOf(bdr, ob, shiny)} scale={4.4} flip />
+          : <div title="Loading your EXP…" style={{ filter: "brightness(0)", opacity: 0.18 }}><Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} scale={4.4} flip /></div>}
+        {floats.map((f) => (
+          <span key={f.id} style={{ position: "absolute", left: "50%", top: 4, transform: "translateX(-50%)", fontSize: fs(13), fontWeight: 700, color: f.color, whiteSpace: "nowrap",
+            textShadow: "1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff", animation: "bdrFloat 1.6s ease-out forwards", pointerEvents: "none", lineHeight: 1 }}>+{f.amt} EXP</span>
+        ))}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6 }}>
+          <span style={{ fontSize: fs(9.5), letterSpacing: 1, color: C.accent }}>{ob ? "◎ OUTBOUND" : "◓ INBOUND"}</span>
+          {flash ? <span style={{ fontSize: fs(11), fontWeight: 700, color: "#d84040", animation: "bdrBlink .4s steps(1) infinite" }}>LEVEL UP!</span>
+            : lvUpsToday > 0 ? <span style={{ fontSize: fs(9.5), fontWeight: 700, color: "#3a9a4a" }}>▲ {lvUpsToday} LV TODAY</span> : null}
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "1px 0 4px" }}>
+          <b style={{ fontSize: fs(15), color: loaded ? "#303030" : C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{loaded ? `${sp.name}${shiny ? " ✦" : ""}` : "???"}</b>
+          <span style={{ fontSize: fs(12), color: loaded ? "#303030" : C.faint }}>:L{loaded ? x.lv : "??"}</span>
+          <span style={{ fontSize: fs(9.5), color: C.faint, marginLeft: "auto", whiteSpace: "nowrap" }}>{loaded ? `${sqas}/${q} SQA` : "??/?? SQA"}</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <b style={{ fontSize: fs(9), background: "#e8b830", padding: "0 4px", borderRadius: 3, border: "1px solid #484848", color: "#303030" }}>EXP</b>
+          <div style={{ flex: 1 }}>{loaded ? <ExpBar x={x} h={11} />
+            : <div style={{ height: 11, border: "2px solid #b8b8b8", borderRadius: 3, background: "repeating-linear-gradient(45deg, #e4e4e4 0 6px, #f4f4f4 6px 12px)", backgroundSize: "24px 100%", animation: g.isError ? undefined : "bdrStripe .8s linear infinite" }} />}</div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: fs(9.5), color: C.muted, marginTop: 3 }}>
+          <span>{loaded ? `${Math.max(0, Math.round(x.lvNext - x.xp)).toLocaleString()} to :L${x.lv + 1}` : "??? to next level"}</span>
+          <b style={{ color: loaded && x.todayXp ? "#303030" : C.faint }}>{g.isError ? "EXP unavailable" : loaded ? `+${x.todayXp.toLocaleString()} today` : "+??? today"}</b>
+        </div>
+        <div style={{ marginTop: 3, minHeight: fs(12) }}>
+          {g.isError ? <span style={{ fontSize: fs(9.5), color: C.danger }}>Couldn't load EXP right now. Your progress is safe; try refreshing.</span>
+            : !loaded ? <span style={{ fontSize: fs(9.5), color: C.faint }}>Who's that creature? Counting up your EXP<span style={{ animation: "bdrBlink 1s steps(1) infinite" }}>…</span></span>
+            : x.todayXp > 0 ? <XpLegend x={x} size={9} /> : <span style={{ fontSize: fs(9.5), color: C.faint }}>{sp.name} is waiting for your first move today…</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Header band on the Inbound / Outbound tabs: trainer nameplate + that tab's creature training live
+// (the card wraps below the nameplate on narrow screens)
+function TrainingShowcase({ bdr, ob }: { bdr: string; ob: boolean }) {
+  const qtr = currentQuarter();
+  const qq = useSQLQuery(quotaSql);
+  const qf = quotaFor(Array.isArray(qq.data) ? qq.data : [], qtr.id, bdr);
+  const tr = trainerOf(bdr);
+  return (
+    <div style={{ margin: "16px 18px 0", display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" }}>
+      <div style={{ background: "#484848", clipPath: "polygon(0 0, 100% 0, calc(100% - 22px) 100%, 0 100%)", padding: 3, borderRadius: "6px 0 0 6px", display: "flex" }}>
+        <div style={{ background: "linear-gradient(180deg, #ffffff 0%, #e2e2e2 100%)", clipPath: "polygon(0 0, 100% 0, calc(100% - 20px) 100%, 0 100%)",
+          padding: "8px 44px 8px 14px", display: "flex", flexDirection: "column", justifyContent: "center", borderRadius: "4px 0 0 4px", borderLeft: `6px solid ${tr.color}` }}>
+          <div style={{ fontSize: fs(18), fontWeight: 700, color: "#303030" }}>{bdrName(bdr).split(" ")[0] || "Trainer"}</div>
+          <div style={{ fontSize: fs(11), color: "#686868" }}>{tr.cls}</div>
+          <div style={{ fontSize: fs(9.5), color: "#888888", marginTop: 2 }}>TRAINING · {qtr.label}</div>
+        </div>
+      </div>
+      <ShowcaseCard key={ob ? "ob" : "in"} bdr={bdr} ob={ob} qtr={qtr} quota={ob ? qf.ob : qf.inb} />
+    </div>
+  );
+}
+
+// =====================================================================
 // ===========================  LEAGUE  ================================
 // =====================================================================
 // View-only. Leaderboard + Hall of Fame reuse the exact Trainer SQL per BDR,
 // so standings can never disagree with the Trainer tab. Nothing here gives XP.
 function summarize(r: any, ob: boolean, quota: number) {
   const sqas = N(r.sqas), meetings = N(r.meetings);
-  const xp = sqas * XP.sqa + meetings * XP.meeting + N(r.connects) * XP.connect + N(r.calls_capped) * XP.call +
-    N(r.emails_capped) * XP.email + N(r.linkedin_capped) * XP.linkedin + N(r.hygiene_capped) * XP.hygiene +
-    (ob ? N(r.accts_opened) * XP.acctOpen + N(r.accts_multi) * XP.acctMulti : 0);
-  const lv = Math.max(1, Math.min(100, Math.floor(Math.cbrt(xp + 1e-9))));
+  const { xp, lv } = xpOf(r, ob);
   const q = Math.max(1, quota);
   const t1 = Math.ceil(q / 3), t2 = Math.ceil((q * 2) / 3);
   const stage = sqas >= t2 ? 2 : sqas >= t1 ? 1 : 0;
@@ -1763,11 +2025,6 @@ function LeagueTab() {
         ) : (
           <Select label="Trainer" value={hofId} onChange={setHofBdr} options={BDRS.map((b) => [b.id, b.name] as [string, string])} />
         )}
-        <span style={{ fontSize: fs(10.5), color: C.faint }}>
-          {view === "board"
-            ? `View-only, no XP. Ranked by credited attainment (all SQAs weigh equally; >100% only counts once the outbound target is hit) · pace = attainment ÷ ${Math.round(elapsedFrac(qtr) * 100)}% of quarter elapsed · same SQL as the Trainer tab`
-            : "Every quarter's final party, replayed live from HubSpot + the terminal ledger"}
-        </span>
       </div>
 
       {view === "board" ? (
@@ -1785,6 +2042,11 @@ function LeagueTab() {
       <div style={{ fontSize: fs(10), color: C.faint, marginTop: 12, lineHeight: 1.6 }}>
         Quotas come from bdr_quotas; BDRs without a row use the default ({DEFAULT_QUOTA} total, {DEFAULT_OB_TARGET} outbound). LinkedIn + hygiene XP only exist from Nov 2026 (when the terminal started logging).
       </div>
+      <span style={{ fontSize: fs(10.5), color: C.faint }}>
+          {view === "board"
+            ? `View-only, no XP. Ranked by credited attainment (all SQAs weigh equally; >100% only counts once the outbound target is hit) · pace = attainment ÷ ${Math.round(elapsedFrac(qtr) * 100)}% of quarter elapsed · same SQL as the Trainer tab`
+            : "Every quarter's final party, replayed live from HubSpot + the terminal ledger"}
+        </span>
     </div>
   );
 }
@@ -1968,7 +2230,7 @@ function FlagLine({ flags }: { flags: string[] }) {
 
 // ---- Action queue: clicks are instant (optimistic); events are batched into one Flight run ----
 type QEvt = { event_id: string; event_type: string; contact_id?: string; company_id?: string; ae_id?: string; retouch_days?: string; note?: string };
-function useActionQueue(acting: string, onSaved: () => void) {
+function useActionQueue(acting: string, onSaved: () => void, ob = false) {
   const [queue, setQueue] = useState<QEvt[]>([]);
   const [inflightN, setInflightN] = useState(0);
   const [msg, setMsg] = useState("");
@@ -1981,6 +2243,7 @@ function useActionQueue(acting: string, onSaved: () => void) {
       inflight.current = [];
       setInflightN(0);
       onSaved();
+      window.dispatchEvent(new CustomEvent("bdr-xp-saved", { detail: { bdr: acting } }));
     },
   });
   useEffect(() => {
@@ -1994,7 +2257,11 @@ function useActionQueue(acting: string, onSaved: () => void) {
     }, 900);
     return () => clearTimeout(t);
   }, [queue, inflightN, acting]);
-  const enqueue = (e: Omit<QEvt, "event_id">) => setQueue((q) => [...q, { event_id: newEventId(), ...e }]);
+  const enqueue = (e: Omit<QEvt, "event_id">) => {
+    setQueue((q) => [...q, { event_id: newEventId(), ...e }]);
+    const gain = xpForEvent(e.event_type, ob);
+    if (gain) window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, ob, kind: gain[0], xp: gain[1] } }));
+  };
   const pendingN = queue.length + inflightN;
   return { enqueue, pendingN, msg: pendingN ? `saving ${pendingN}…` : msg };
 }
@@ -2051,17 +2318,21 @@ function DraftsTab() {
 
   return (
     <div style={{ fontFamily: UI.body }}>
+      <h1 style={{ fontSize: UI.game ? fs(20) : 21, fontWeight: 800, margin: UI.game ? "8px 0 4px" : "2px 0 0", fontFamily: UI.pixel }}>Drafting Center</h1>
+      <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
+        Below are settings to adjust behavior, like auto CC-ing AE/CE or changing model's voice to a different BDR's style.
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 10 }}>
         <span style={{ fontSize: fs(10.5), color: C.faint }}>Voice: <b style={{ color: C.accent }}>{me?.name ?? acting}</b></span>
+         <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={ccAe} onChange={(e) => setCcAe(e.target.checked)} /> CC's AE</label>
+        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={ccCe} onChange={(e) => setCcCe(e.target.checked)} /> CC's CE</label>
+        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={bccHs} onChange={(e) => setBccHs(e.target.checked)} /> BCC HubSpot (logs it)</label>
         <Select label="Play" value={tplOverride} onChange={setTplOverride}
           options={[["auto", "auto (by top signal)"], ...templates.map((t) => [S(t.template_id), S(t.label)] as [string, string])]} />
         <Select label="Model" value={model} onChange={setModel} options={[["gpt-4o", "gpt-4o (better)"], ["gpt-4o-mini", "gpt-4o-mini (faster)"]]} />
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={ccAe} onChange={(e) => setCcAe(e.target.checked)} /> CC AE</label>
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={ccCe} onChange={(e) => setCcCe(e.target.checked)} /> CC CE</label>
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={bccHs} onChange={(e) => setBccHs(e.target.checked)} /> BCC HubSpot (logs it)</label>
       </div>
       <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-        <input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="Extra instructions for this batch (optional) — e.g. mention the DuckLake book, keep it under 50 words"
+        <input value={extra} onChange={(e) => setExtra(e.target.value)} placeholder="Extra instructions for AI"
           style={{ ...ctl, flex: 1 }} />
         <button disabled={!reqs.length || (!!req && g.isLoading)} onClick={generate} style={btn(C.accent, !reqs.length || (!!req && g.isLoading))}>
           <Sparkles size={12} /> {req && g.isLoading ? "Writing…" : `Generate ${reqs.length} draft${reqs.length === 1 ? "" : "s"}`}
@@ -2135,7 +2406,9 @@ function DraftsTab() {
       </div>
       <div style={{ fontSize: fs(10), color: C.faint, marginTop: 12, lineHeight: 1.6 }}>
         Drafts use MotherDuck prompt() with your voice profile + the play. Nothing sends from the terminal: Gmail opens prefilled, you review + send.
+
         BCC HubSpot logs the email to the contact like your manual sends. Max 15 per batch.
+
         Opening in Gmail or hitting Save stores the draft in MotherDuck (not HubSpot); your sent/edited drafts become voice examples for future drafts.
         {saver.msg ? ` · ${saver.msg}` : ""}
       </div>
@@ -2528,7 +2801,7 @@ function OutboundFeed() {
   }, [q.data, ovMap, aeOverride]);
 
   // write path: batched action queue (same Flight as the Signal Feed); optimistic state bridges the ~1 min share lag
-  const aq = useActionQueue(acting, () => { ovQ.refetch(); aeQ.refetch(); setTimeout(() => { ovQ.refetch(); aeQ.refetch(); }, 30000); setTimeout(() => { ovQ.refetch(); aeQ.refetch(); }, 75000); });
+  const aq = useActionQueue(acting, () => { ovQ.refetch(); aeQ.refetch(); setTimeout(() => { ovQ.refetch(); aeQ.refetch(); }, 30000); setTimeout(() => { ovQ.refetch(); aeQ.refetch(); }, 75000); }, true);
   const busy = false;
   const runMsg = aq.msg;
   const dropLater = (key: string, ae = false) => setTimeout(() => ((ae ? setAePending : setPending) as any)((p: any) => { const n = { ...p }; delete n[key]; return n; }), 120000);
@@ -2963,6 +3236,36 @@ function SignalFeed() {
     (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (search ? 1 : 0) + (opened !== "any" ? 1 : 0) + (pages.length ? 1 : 0);
   const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
 
+  // HubSpot bar: lives inside the dialog box in the Unova theme, in the header otherwise.
+  const hsButtons = (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
+      <a href={HS_INDEX} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}><ExternalLink size={12} /> Open in HubSpot</a>
+      <button style={btn(C.accent)} onClick={() => copyText("filters", hubspotRecipe({ owners: scopeIds, bucket, sigs: sigSel, opened, pages, hasLi, createdWin }).join("\nAND "))}>Copy HubSpot filters</button>
+      <button style={btn(C.accent)} onClick={() => copyText("emails", sorted.map((r) => r.email).filter(Boolean).join(", "))}>Copy {sorted.filter((r) => r.email).length} emails</button>
+      <button style={btn(C.muted)} onClick={() => setShowRecipe(!showRecipe)}>{showRecipe ? "Hide" : "Show"} filter recipe</button>
+      {copied && <span style={{ fontSize: fs(10.5), color: C.ok }}>✓ {copied} copied</span>}
+    </div>
+  );
+  const hsPanels = (
+    <>
+      {showRecipe && (
+        <div style={{ ...PANEL(), padding: 12, marginTop: 8, fontSize: fs(11.5), lineHeight: 1.6, maxWidth: 760 }}>
+          <div style={{ fontWeight: 700, marginBottom: 4 }}>HubSpot filters for this view ({sorted.length} contacts here)</div>
+          {hubspotRecipe({ owners: scopeIds, bucket, sigs: sigSel, opened, pages, hasLi, createdWin }).map((l, i) => (
+            <div key={i} style={{ color: l.includes("NOT IN HUBSPOT") || l.startsWith("TERMINAL-ONLY") ? C.warn : C.text }}>{i ? "AND " : ""}{l}</div>
+          ))}
+          <div style={{ color: C.faint, marginTop: 6 }}>In HubSpot: Contacts → All contacts → Advanced filters, add each line, then save it as a view. Lines marked NOT IN HUBSPOT / TERMINAL-ONLY can't be filtered there; use Copy emails to compare lists exactly.</div>
+        </div>
+      )}
+      {copyBox && (
+        <div style={{ marginTop: 8, maxWidth: 760 }}>
+          <div style={{ fontSize: fs(10.5), color: C.muted, marginBottom: 4 }}>Your browser blocked the clipboard here. Select all and copy:</div>
+          <textarea readOnly value={copyBox} onFocus={(e) => e.currentTarget.select()} rows={4} style={{ ...ctl, width: "100%" }} />
+        </div>
+      )}
+    </>
+  );
+
   return (
     <div style={{ background: UI.game ? "transparent" : C.page, color: C.text, minHeight: "100%", padding: 18, fontFamily: UI.body }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
@@ -2974,31 +3277,8 @@ function SignalFeed() {
             {ovQ.isError ? " · overlay unavailable (read-only)" : ""}
             {aq.msg ? <span style={{ color: aq.msg.startsWith("✗") ? C.danger : C.accent }}> · {aq.msg}</span> : null}
           </div>
-          <div style={{ fontSize: fs(10), color: C.faint, marginTop: 2 }}>
-            keys: j/k next/prev · r reviewed (auto-advances) · 3 / 7 / f retouch 3d/7d/14d · h HubSpot · l LinkedIn · x select for draft
-          </div>
-          <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
-            <a href={HS_INDEX} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}><ExternalLink size={12} /> Open in HubSpot</a>
-            <button style={btn(C.accent)} onClick={() => copyText("filters", hubspotRecipe({ owners: scopeIds, bucket, sigs: sigSel, opened, pages, hasLi, createdWin }).join("\nAND "))}>Copy HubSpot filters</button>
-            <button style={btn(C.accent)} onClick={() => copyText("emails", sorted.map((r) => r.email).filter(Boolean).join(", "))}>Copy {sorted.filter((r) => r.email).length} emails</button>
-            <button style={btn(C.muted)} onClick={() => setShowRecipe(!showRecipe)}>{showRecipe ? "Hide" : "Show"} filter recipe</button>
-            {copied && <span style={{ fontSize: fs(10.5), color: C.ok }}>✓ {copied} copied</span>}
-          </div>
-          {showRecipe && (
-            <div style={{ ...PANEL(), padding: 12, marginTop: 8, fontSize: fs(11.5), lineHeight: 1.6, maxWidth: 760 }}>
-              <div style={{ fontWeight: 700, marginBottom: 4 }}>HubSpot filters for this view ({sorted.length} contacts here)</div>
-              {hubspotRecipe({ owners: scopeIds, bucket, sigs: sigSel, opened, pages, hasLi, createdWin }).map((l, i) => (
-                <div key={i} style={{ color: l.includes("NOT IN HUBSPOT") || l.startsWith("TERMINAL-ONLY") ? C.warn : C.text }}>{i ? "AND " : ""}{l}</div>
-              ))}
-              <div style={{ color: C.faint, marginTop: 6 }}>In HubSpot: Contacts → All contacts → Advanced filters, add each line, then save it as a view. Lines marked NOT IN HUBSPOT / TERMINAL-ONLY can't be filtered there; use Copy emails to compare lists exactly.</div>
-            </div>
-          )}
-          {copyBox && (
-            <div style={{ marginTop: 8, maxWidth: 760 }}>
-              <div style={{ fontSize: fs(10.5), color: C.muted, marginBottom: 4 }}>Your browser blocked the clipboard here. Select all and copy:</div>
-              <textarea readOnly value={copyBox} onFocus={(e) => e.currentTarget.select()} rows={4} style={{ ...ctl, width: "100%" }} />
-            </div>
-          )}
+          {!UI.game && hsButtons}
+          {!UI.game && hsPanels}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(10.5), color: C.faint }}>
@@ -3017,8 +3297,10 @@ function SignalFeed() {
           {(() => { const hr = scoped.filter((r) => r.unhandled.some((s) => s.sig === "Hand-raiser")).length; return hr ? `${hr} hand-raiser${hr > 1 ? "s" : ""} want${hr > 1 ? "" : "s"} to talk. ` : ""; })()}
           {bucketCounts.retouch_due ? `${bucketCounts.retouch_due} retouch${bucketCounts.retouch_due > 1 ? "es" : ""} due. ` : ""}
           What will {bdrName(acting).split(" ")[0] || "you"} do?
+          {hsButtons}
         </DialogBox>
       )}
+      {UI.game && hsPanels}
       <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 10, flexWrap: "wrap" }}>
         {BUCKETS.map((b) => {
           const on = bucket === b.id;
@@ -3134,9 +3416,11 @@ function SignalFeed() {
       )}
 
       <div style={{ fontSize: fs(10), color: C.faint, marginTop: 12, lineHeight: 1.6 }}>
-        Signals look back 30 days; "Active" = signal ≤14d with no touch since · Last touch = latest email/call/meeting by anyone (BDR, AE, CE) + LinkedIn logged here ·
-        HubSpot syncs ~every 4h, usage/AWR nightly · Actions apply instantly and save in batches via the bdr_terminal_log_action Flight (MotherDuck only, never HubSpot); only the queue owner can write ·
-        Post-SQA = the contact or its company has an SQA (BDR Terminal rules) that is open, won, or lost in the last 180 days; older closed-lost SQAs recycle back into the queue.
+        <div>Signals look back 30 days; "Active" = signal ≤14d with no touch since.</div>
+        <div>Last touch = latest email/call/meeting by anyone (BDR, AE, CE) + LinkedIn logged here.</div>
+        <div>HubSpot syncs ~every 4h, usage/AWR nightly.</div>
+        <div>Actions apply instantly and save in batches via the bdr_terminal_log_action Flight (MotherDuck only, never HubSpot); only the queue owner can write.</div>
+        <div>Post-SQA = the contact or its company has an SQA (BDR Terminal rules) that is open, won, or lost in the last 180 days; older closed-lost SQAs recycle back into the queue.</div>
       </div>
     </div>
   );
@@ -3182,26 +3466,13 @@ export default function BdrTerminal() {
   applyTheme(theme === "terminal" ? "terminal" : "unova", uiSize);
   const game = UI.game;
   const me = bdrName(acting);
-  const TABS: [string, string, string][] = [["feed", "▤ SIGNAL FEED", "SIGNALS"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
+  const TABS: [string, string, string][] = [["feed", "▤ SIGNAL FEED", "INBOUND"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
   const wrap: any = { padding: 18, background: game ? "transparent" : C.page, color: C.text };
   const rivet = (pos: any): any => ({ position: "absolute", width: 8, height: 8, borderRadius: 999, background: "#5fb3e6", boxShadow: "inset -1px -1px 0 #0a3550", ...pos });
   return (
     <div className="bdr-root" style={{ background: UI.bg, minHeight: "100%", color: C.text, fontFamily: UI.body }}>
       <style>{FONT_CSS}</style>
-      {game && (
-        <div style={{ margin: "16px 18px 0", display: "flex" }}>
-          <div style={{ background: "#484848", clipPath: "polygon(0 0, 100% 0, calc(100% - 28px) 100%, 0 100%)", padding: "3px 3px 3px 3px", borderRadius: "6px 0 0 6px" }}>
-            <div style={{ background: "linear-gradient(180deg, #ffffff 0%, #e2e2e2 100%)", clipPath: "polygon(0 0, 100% 0, calc(100% - 26px) 100%, 0 100%)",
-              padding: "8px 60px 8px 14px", display: "flex", alignItems: "center", gap: 12, borderRadius: "4px 0 0 4px" }}>
-              <Sprite map={lineFor(acting, false)[0].map} pal={palOf(acting, false, false)} scale={2.6} />
-              <div>
-                <div style={{ fontSize: fs(18), fontWeight: 700, color: "#303030" }}>{me.split(" ")[0] || "Trainer"}</div>
-                <div style={{ fontSize: fs(11), color: "#686868", display: "flex", alignItems: "center", gap: 6 }}><span style={{ width: 9, height: 9, borderRadius: 2, background: trainerOf(acting).color, display: "inline-block" }} />{trainerOf(acting).cls} · {QUARTERS[0].label}</div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {game && (tab === "feed" || tab === "outbound") && <TrainingShowcase bdr={acting} ob={tab === "outbound"} />}
       <div style={{ position: "relative", display: "flex", gap: game ? 8 : 2, padding: game ? "14px 18px 0" : "10px 18px 0", background: game ? "transparent" : C.page, alignItems: "center", flexWrap: "wrap" }}>
         {TABS.map(([id, label, short]) => {
           const on = tab === id;
