@@ -19,6 +19,7 @@ type ConnectionState =
   | { status: "idle" }
   | { status: "connecting" }
   | { status: "connected"; connection: MDConnection }
+  | { status: "mock" }
   | { status: "error"; error: Error };
 
 export type UseSQLQueryResult<TData = readonly DuckDBRow[]> = {
@@ -64,7 +65,7 @@ class QueryObserver {
   getSnapshot = () => this.state;
   getStatus() { return this.state.status; }
 
-  private setState(updates: Partial<QueryObserverState>) {
+  setState(updates: Partial<QueryObserverState>) {
     this.state = { ...this.state, ...updates };
     this.listeners.forEach((l) => l());
   }
@@ -119,11 +120,12 @@ function useSDKContext() {
 }
 
 export function MotherDuckSDKProvider(
-  { token, children }: { token: string; children: ReactNode },
+  { token, mock, children }: { token: string; mock?: boolean; children: ReactNode },
 ) {
-  const [state, setState] = useState<ConnectionState>({ status: "idle" });
+  const [state, setState] = useState<ConnectionState>(mock ? { status: "mock" } : { status: "idle" });
 
   useEffect(() => {
+    if (mock) { setState({ status: "mock" }); return; }
     if (!token) { setState({ status: "idle" }); return; }
     let cancelled = false;
     let conn: MDConnection | null = null;
@@ -141,7 +143,7 @@ export function MotherDuckSDKProvider(
       }
     })();
     return () => { cancelled = true; conn?.close(); };
-  }, [token]);
+  }, [token, mock]);
 
   const value = useMemo(() => ({ state }), [state]);
   return <SDKContext.Provider value={value}>{children}</SDKContext.Provider>;
@@ -164,6 +166,18 @@ export function useSQLQuery<TData = readonly DuckDBRow[]>(
   const enabled = options?.enabled !== false;
 
   useEffect(() => {
+    if (connState.status === "mock") {
+      // Mock mode: every query succeeds with zero rows (or a fixture from window.__MOCK_ROWS__).
+      // ?mockDelay=<ms> in the preview URL keeps queries loading that long (to check loading states)
+      const fx = (globalThis as any).__MOCK_ROWS__?.(sql) ?? [];
+      if (!enabled) return;
+      const delay = Number(new URLSearchParams(location.search).get("mockDelay") || 0);
+      const done = () => (observer as any).setState({ status: "success", data: fx, error: undefined, hasHadData: true, lastData: fx });
+      if (!delay) { done(); return; }
+      (observer as any).setState({ status: "loading" });
+      const t = setTimeout(done, delay);
+      return () => clearTimeout(t);
+    }
     if (!enabled || connState.status !== "connected") {
       if (observer.getStatus() !== "idle") observer.reset();
       return;
@@ -222,8 +236,72 @@ export function useConnection(): MDConnection | null {
 export function useConnectionStatus() {
   const { state } = useSDKContext();
   return {
-    isConnected: state.status === "connected",
+    isConnected: state.status === "connected" || state.status === "mock",
     isConnecting: state.status === "connecting",
     error: state.status === "error" ? state.error : null,
   };
+}
+
+// ── useDiveState ───────────────────────────────────────────────────
+// Local preview: persisted per key in sessionStorage (production syncs it with the Dive).
+
+export function useDiveState<T>(key: string, initial: T): [T, (v: T | ((p: T) => T)) => void] {
+  const sk = `dive-state:${key}`;
+  const [v, setV] = useState<T>(() => {
+    try {
+      // ?ds.<key>=<json> in the preview URL overrides state (handy for screenshots / deep links)
+      const q = new URLSearchParams(location.search).get(`ds.${key}`);
+      if (q != null) { try { return JSON.parse(q); } catch { return q as unknown as T; } }
+      const raw = sessionStorage.getItem(sk); return raw != null ? JSON.parse(raw) : initial;
+    }
+    catch { return initial; }
+  });
+  const set = useCallback((nv: T | ((p: T) => T)) => {
+    setV((prev) => {
+      const next = typeof nv === "function" ? (nv as (p: T) => T)(prev) : nv;
+      try { sessionStorage.setItem(sk, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }, [sk]);
+  return [v, set];
+}
+
+// ── Flights (local stubs) ──────────────────────────────────────────
+// Runs are not executed locally; each run "succeeds" after a short delay and logs its config.
+
+const fakeRuns = new Map<string, { status: string }>();
+let fakeRunCounter = 0;
+
+export function useRunFlight(flightId: string) {
+  const [data, setData] = useState<{ runNumber: number } | undefined>();
+  const [isPending, setPending] = useState(false);
+  const run = useCallback((config?: Record<string, string>) => {
+    const runNumber = ++fakeRunCounter;
+    console.info(`[preview] flight ${flightId} run #${runNumber} (not executed)`, config);
+    fakeRuns.set(`${flightId}:${runNumber}`, { status: "SUCCEEDED" });
+    setPending(true);
+    setTimeout(() => { setData({ runNumber }); setPending(false); }, 300);
+  }, [flightId]);
+  return { run, data, isPending, error: null as Error | null };
+}
+
+export function useFlightRun(
+  flightId: string,
+  runNumber: number | undefined,
+  opts?: { onFinished?: (r: { status: string; runNumber: number }) => void },
+) {
+  const [isChecking, setChecking] = useState(false);
+  const cb = useRef(opts?.onFinished);
+  cb.current = opts?.onFinished;
+  useEffect(() => {
+    if (runNumber == null) return;
+    setChecking(true);
+    const t = setTimeout(() => {
+      const r = fakeRuns.get(`${flightId}:${runNumber}`) ?? { status: "SUCCEEDED" };
+      setChecking(false);
+      cb.current?.({ status: r.status, runNumber });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [flightId, runNumber]);
+  return { isChecking, data: runNumber == null ? undefined : { status: "SUCCEEDED", runNumber } };
 }
