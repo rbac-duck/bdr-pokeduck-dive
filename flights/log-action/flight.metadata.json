@@ -1,7 +1,7 @@
 {
   "id": "c258178b-dd1b-4cd6-a589-2e8944793085",
   "name": "bdr_terminal_log_action",
-  "version": 4,
+  "version": 5,
   "max_runtime_sec": 120,
   "instance_type": "F4",
   "access_token_name": "MotherDuck Flights",

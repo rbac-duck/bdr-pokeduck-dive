@@ -414,6 +414,7 @@ SELECT
   c.hubspot_owner_id AS owner_id,
   COALESCE(CASE WHEN COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) IN (SELECT owner_id FROM owners_sel) THEN COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) END, nso.bdr_owner, COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id)) AS queue_owner_id,
   TRIM(COALESCE(cow.firstName, '') || ' ' || COALESCE(cow.lastName, '')) AS contact_owner_name,
+  c.outbound_linkedin_activity_label AS hs_li,
   NULLIF(TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,'')), '') AS contact_name,
   c.email, c.jobtitle,
   COALESCE(co.name, c.company, c.associated_company_domain_name) AS company,
@@ -476,24 +477,30 @@ CROSS JOIN LATERAL (SELECT COALESCE(c.hs_analytics_last_url, '') || ' ' || COALE
 }
 
 const overlaySql = `
-SELECT contact_id::VARCHAR AS contact_id, last_actor_bdr_id,
+SELECT q.contact_id::VARCHAR AS contact_id, last_actor_bdr_id,
   strftime(reviewed_ts, '%Y-%m-%dT%H:%M:%S') AS reviewed_ts,
   strftime(retouch_event_ts, '%Y-%m-%dT%H:%M:%S') AS retouch_event_ts,
   strftime(retouch_on, '%Y-%m-%d') AS retouch_on,
   linkedin_status,
   strftime(last_linkedin_ts, '%Y-%m-%dT%H:%M:%S') AS last_linkedin_ts,
   last_linkedin_actor, linkedin_14d, last_note,
-  strftime(last_note_ts, '%Y-%m-%dT%H:%M:%S') AS last_note_ts
-FROM "bdr_terminal_gamified"."main"."contact_queue_state"`;
+  strftime(last_note_ts, '%Y-%m-%dT%H:%M:%S') AS last_note_ts,
+  li.li_hist
+FROM "bdr_terminal_gamified"."main"."contact_queue_state" q
+LEFT JOIN (
+  SELECT contact_id, to_json(list({'t': event_type, 'ts': strftime(event_ts, '%Y-%m-%dT%H:%M:%S'), 'by': actor_bdr_id} ORDER BY event_ts))::VARCHAR AS li_hist
+  FROM "bdr_terminal_gamified"."main"."touch_events"
+  WHERE event_type LIKE 'linkedin_%' AND contact_id IS NOT NULL GROUP BY 1
+) li ON li.contact_id = q.contact_id`;
 
 type Sig = { sig: string; rnk: number; ts: number | null; detail: string; handled?: boolean };
 type Ov = {
   reviewed_ts: number | null; retouch_event_ts: number | null; retouch_on: string | null;
   linkedin_status: string; last_linkedin_ts: number | null; last_linkedin_actor: string; linkedin_14d: number;
-  last_note: string; last_note_ts: number | null;
+  last_note: string; last_note_ts: number | null; li_hist: LiEvt[];
 };
 type Row = {
-  contact_id: string; owner_id: string; contact_owner: string; queue_owner_id: string; contact_name: string; email: string; jobtitle: string;
+  contact_id: string; owner_id: string; contact_owner: string; hs_li: string; queue_owner_id: string; contact_name: string; email: string; jobtitle: string;
   company: string; linkedin_url: string; ae_name: string; signals: Sig[]; plan: string; org_name: string; org_count: number;
   primary_org_id: string; m_add_data: boolean; m_connect_tools: boolean; m_share_data: boolean; cpu_7d: number;
   cpu_prev7d: number; awr: number; trial_end_date: string; lifecycle: string; lead_status: string;
@@ -514,7 +521,7 @@ function toRow(r: any): Row {
     }));
   } catch { sigs = []; }
   return {
-    contact_id: S(r.contact_id), owner_id: S(r.owner_id), contact_owner: S(r.contact_owner_name), queue_owner_id: S(r.queue_owner_id),
+    contact_id: S(r.contact_id), owner_id: S(r.owner_id), contact_owner: S(r.contact_owner_name), hs_li: S(r.hs_li), queue_owner_id: S(r.queue_owner_id),
     contact_name: S(r.contact_name), email: S(r.email), jobtitle: S(r.jobtitle), company: S(r.company),
     linkedin_url: normUrl(S(r.linkedin_url)), ae_name: S(r.ae_name), signals: sigs, plan: S(r.plan), org_name: S(r.org_name),
     org_count: N(r.org_count), primary_org_id: S(r.primary_org_id), m_add_data: B(r.m_add_data),
@@ -536,8 +543,74 @@ function toOv(r: any): Ov {
     reviewed_ts: T(S(r.reviewed_ts)), retouch_event_ts: T(S(r.retouch_event_ts)), retouch_on: r.retouch_on ? S(r.retouch_on) : null,
     linkedin_status: S(r.linkedin_status), last_linkedin_ts: T(S(r.last_linkedin_ts)), last_linkedin_actor: S(r.last_linkedin_actor),
     linkedin_14d: N(r.linkedin_14d), last_note: S(r.last_note), last_note_ts: T(S(r.last_note_ts)),
+    li_hist: (() => { try { return (JSON.parse(S(r.li_hist) || "[]") as any[]).map((e) => ({ t: S(e.t), ts: T(S(e.ts)), by: S(e.by) })); } catch { return []; } })(),
   };
 }
+
+// ---- LinkedIn relationship: furthest step reached, from the terminal ledger + HubSpot's Outbound LinkedIn Activity ----
+type LiEvt = { t: string; ts: number | null; by: string };
+const LI_STAGES = [
+  { label: "No LinkedIn activity", short: "LI", color: "#b8b8b8", ink: "#686868" },
+  { label: "Request sent", short: "Requested", color: "#a9cdf0", ink: "#1d4f80" },
+  { label: "Connected", short: "Connected", color: "#5aa3e6", ink: "#ffffff" },
+  { label: "Messaged", short: "Messaged", color: "#0a66c2", ink: "#ffffff" },
+  { label: "They replied", short: "Replied", color: "#2f9e44", ink: "#ffffff" },
+];
+const LI_EVT_STAGE: Record<string, number> = { linkedin_request_sent: 1, linkedin_accepted: 2, linkedin_message: 3, linkedin_reply: 4 };
+const hsLiStage = (v: string) => (/awaiting prospect reply/i.test(v) ? 3 : /connection requested/i.test(v) ? 1 : 0);
+function liInfo(ov: Ov | undefined, hsLi: string) {
+  const ev = (ov?.li_hist ?? []).filter((e) => LI_EVT_STAGE[e.t]);
+  const logged = ev.reduce((m, e) => Math.max(m, LI_EVT_STAGE[e.t]), 0);
+  const hs = hsLiStage(hsLi || "");
+  const firstAt: (LiEvt | undefined)[] = [undefined, 1, 2, 3, 4].map((k) => (k ? ev.find((e) => LI_EVT_STAGE[e.t] === k) : undefined));
+  return { stage: Math.max(logged, hs), logged, hs, hsLabel: hsLi || "", ev, firstAt };
+}
+type LiInfo = ReturnType<typeof liInfo>;
+const fmtDay = (t: number | null) => (t == null ? "" : new Date(t).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" }));
+const liTitle = (li: LiInfo) => {
+  const steps = [1, 2, 3, 4].filter((k) => li.firstAt[k]).map((k) => `${LI_STAGES[k].label} ${fmtDay(li.firstAt[k]!.ts)} (${bdrName(li.firstAt[k]!.by).split(" ")[0]})`);
+  if (li.hs && li.hs > li.logged) steps.unshift(`HubSpot: ${li.hsLabel.replace(/^LinkedIn:\s*/i, "")}`);
+  return steps.length ? steps.join(" → ") : "No LinkedIn activity logged yet";
+};
+
+// Compact pill for list rows
+function LiBadge({ li }: { li: LiInfo }) {
+  const s = LI_STAGES[li.stage];
+  return (
+    <span title={liTitle(li)} style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "0 5px", borderRadius: 999, fontSize: fs(9.5), lineHeight: 1.6,
+      background: li.stage ? s.color : "transparent", color: li.stage ? s.ink : C.faint, border: li.stage ? "1px solid rgba(0,0,0,.15)" : `1px dashed ${C.border}`, whiteSpace: "nowrap", flexShrink: 0 }}>
+      <Linkedin size={9} />{li.stage ? s.short : ""}
+    </span>
+  );
+}
+
+// Step-by-step history for the contact card
+function LiTimeline({ li }: { li: LiInfo }) {
+  if (!li.stage) return <span style={{ fontSize: fs(10.5), color: C.faint }}>No LinkedIn activity logged yet. Use the buttons as you go.</span>;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", fontSize: fs(10.5) }}>
+      {li.hs > li.logged && <span style={{ color: C.muted }} title="From HubSpot's Outbound LinkedIn Activity field">HubSpot: {li.hsLabel.replace(/^LinkedIn:\s*/i, "")}{li.logged ? " ·" : ""}</span>}
+      {[1, 2, 3, 4].map((k) => {
+        const e = li.firstAt[k];
+        const reached = !!e || (!li.logged && li.hs >= k);
+        if (!e) return reached ? null : <span key={k} style={{ color: C.faint, opacity: 0.6 }}>{k > 1 ? "→ " : ""}{LI_STAGES[k].short}</span>;
+        return (
+          <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+            {k > 1 ? <span style={{ color: C.faint }}>→</span> : null}
+            <span style={{ background: LI_STAGES[k].color, color: LI_STAGES[k].ink, borderRadius: 4, padding: "0 5px" }}>{LI_STAGES[k].short}</span>
+            <span style={{ color: C.muted }}>{fmtDay(e.ts)} · {bdrName(e.by).split(" ")[0]}</span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
+const LI_FILTER_OPTS: [string, string][] = [["any", "any"], ["none", "no activity yet"], ["some", "any activity"], ["requested", "requested, not accepted"],
+  ["connected", "connected, not messaged"], ["messaged", "messaged, no reply"], ["replied", "replied"]];
+const liMatches = (f: string, li: LiInfo) => f === "any" || (f === "none" ? li.stage === 0 : f === "some" ? li.stage > 0
+  : li.stage === ({ requested: 1, connected: 2, messaged: 3, replied: 4 } as any)[f]);
+
 
 // Core workflow logic: merge overlay, decide bucket + priority.
 function derive(r: Row, ov: Ov | undefined): Row {
@@ -909,8 +982,7 @@ function Card({ r, acting, busy, onAct, runMsg }: { r: Row; acting: string; busy
           {[["linkedin_request_sent", "Request sent"], ["linkedin_accepted", "Accepted"], ["linkedin_message", "Messaged"], ["linkedin_reply", "They replied"]].map(([t, l]) => (
             <button key={t} disabled={dis} style={btn("#5fb3ff", dis)} onClick={() => onAct(t)}><Linkedin size={12} /> {l}</button>
           ))}
-          {r.ov?.linkedin_status && <span style={{ fontSize: fs(10.5), color: C.faint, alignSelf: "center" }}>
-            LinkedIn: {r.ov.linkedin_status.replace("linkedin_", "").replace("_", " ")} · {fmtAgo(r.ov.last_linkedin_ts)}</span>}
+          <div style={{ flexBasis: "100%", marginTop: 2 }}><LiTimeline li={liInfo(r.ov, r.hs_li)} /></div>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
           <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Quick note (stays in the terminal)" disabled={dis}
@@ -2712,7 +2784,7 @@ sqa_hit AS (
   GROUP BY 1
 )
 SELECT
-  c.hs_object_id AS contact_id, COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) AS owner_id,
+  c.hs_object_id AS contact_id, COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) AS owner_id, c.outbound_linkedin_activity_label AS hs_li,
   NULLIF(TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,'')), '') AS contact_name,
   c.email, COALESCE(NULLIF(c.jobtitle,''), c.ap_title) AS title,
   COALESCE(NULLIF(c.associatedcompanyid,''), 'nocompany:' || c.hs_object_id) AS company_id,
@@ -2748,7 +2820,7 @@ type ObContact = {
   contact_id: string; owner_id: string; contact_name: string; email: string; title: string; linkedin_url: string;
   created: number | null; last_touch: number | null; last_by: string; last_by_id: string; last_channel: string;
   touches_14d: number; touches_180d: number; calls_total: number; calls_connected: number; last_reply: number | null;
-  in_sequence: boolean; signals: Sig[]; ov?: Ov;
+  in_sequence: boolean; signals: Sig[]; ov?: Ov; hs_li: string;
 };
 type ObAccount = {
   company_id: string; company: string; domain: string; segment: string; play: string; hs_ae_id: string; hs_ae_name: string;
@@ -2764,6 +2836,7 @@ function OutboundFeed() {
   const [aeFilter, setAeFilter] = useDiveState<string>("obAe", "any");
   const [segFilter, setSegFilter] = useDiveState<string>("obSeg", "any");
   const [playFilter, setPlayFilter] = useDiveState<string>("obPlay", "any");
+  const [obLiF, setObLiF] = useDiveState<string>("obLiF", "any");
   const [sortBy, setSortBy] = useDiveState<string>("obSort", "priority");
   const [showPost, setShowPost] = useDiveState<boolean>("obPost", false);
   const [selected, setSelected] = useDiveState<string | null>("obSel", null);
@@ -2817,7 +2890,7 @@ function OutboundFeed() {
         last_by: liNewer ? bdrName(ov!.last_linkedin_actor) : S(r.last_touch_by), last_by_id: liNewer ? ov!.last_linkedin_actor : S(r.last_touch_actor_id),
         last_channel: liNewer ? "LinkedIn" : S(r.last_touch_channel), touches_14d: N(r.touches_14d) + (ov?.linkedin_14d ?? 0),
         touches_180d: N(r.touches_180d), calls_total: N(r.calls_total), calls_connected: N(r.calls_connected),
-        last_reply: T(S(r.last_reply_ts)), in_sequence: B(r.in_sequence), signals: sigs.sort((a, b) => a.rnk - b.rnk), ov,
+        last_reply: T(S(r.last_reply_ts)), in_sequence: B(r.in_sequence), signals: sigs.sort((a, b) => a.rnk - b.rnk), ov, hs_li: S(r.hs_li),
       };
       const a = byCo[cid] ?? (byCo[cid] = {
         company_id: cid, company: S(r.company) || "(no company)", domain: S(r.domain), segment: S(r.segment), play: S(r.outbound_play),
@@ -2867,7 +2940,7 @@ function OutboundFeed() {
     if (type === "reviewed") patch.reviewed_ts = now;
     if (type === "retouch_set") { const d = new Date(); d.setUTCDate(d.getUTCDate() + Number(extra.days || 7)); patch.retouch_on = d.toISOString().slice(0, 10); patch.retouch_event_ts = now; }
     if (type === "retouch_clear") { patch.retouch_on = null; patch.retouch_event_ts = now; }
-    if (type.startsWith("linkedin_")) { patch.linkedin_status = type; patch.last_linkedin_ts = now; patch.last_linkedin_actor = acting; patch.linkedin_14d = (c.ov?.linkedin_14d ?? 0) + 1; }
+    if (type.startsWith("linkedin_")) { patch.linkedin_status = type; patch.last_linkedin_ts = now; patch.last_linkedin_actor = acting; patch.linkedin_14d = (c.ov?.linkedin_14d ?? 0) + 1; patch.li_hist = [...(c.ov?.li_hist ?? []), { t: type, ts: now, by: acting }]; }
     setPending((p) => ({ ...p, [c.contact_id]: { ...(p[c.contact_id] ?? {}), ...patch } }));
     dropLater(c.contact_id);
     aq.enqueue({ event_type: type, contact_id: c.contact_id, retouch_days: type === "retouch_set" ? String(extra.days || 7) : undefined });
@@ -2892,6 +2965,7 @@ function OutboundFeed() {
     if (aeFilter !== "any" && aeFilter !== "unassigned" && a.ae_id !== aeFilter) return false;
     if (segFilter !== "any" && a.segment !== segFilter) return false;
     if (playFilter !== "any" && a.play !== playFilter) return false;
+    if (obLiF !== "any" && !a.contacts.some((c) => liMatches(obLiF, liInfo(c.ov, c.hs_li)))) return false;
     if (!needle) return true;
     return [a.company, a.domain, aeLabel(a), ...a.contacts.map((c) => `${c.contact_name} ${c.email} ${c.title}`)].some((v) => (v || "").toLowerCase().includes(needle));
   }).sort((x, y) => {
@@ -2953,6 +3027,7 @@ function OutboundFeed() {
         <Select label="AE" value={aeFilter} onChange={setAeFilter} options={[["any", "any"], ["unassigned", "Unassigned"], ...aeOpts]} />
         <Select label="Segment" value={segFilter} onChange={setSegFilter} options={[["any", "any"], ...segOpts.map((s) => [s, s] as [string, string])]} />
         <Select label="Play" value={playFilter} onChange={setPlayFilter} options={[["any", "any"], ...playOpts.map((s) => [s, s] as [string, string])]} />
+        <Select label="LinkedIn" value={obLiF} onChange={setObLiF} options={LI_FILTER_OPTS} />
         <Select label="Sort" value={sortBy} onChange={setSortBy} options={[["priority", "priority"], ["stale", "longest since touch"], ["recent", "most recently touched"], ["contacts", "most contacts"], ["segment", "segment (ENT→Micro)"], ["company", "company A–Z"]]} />
         <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
           <input type="checkbox" checked={showPost} onChange={(e) => setShowPost(e.target.checked)} /> post-SQA
@@ -3041,12 +3116,12 @@ function OutboundFeed() {
                       <div key={c.contact_id} style={{ borderBottom: `1px solid ${C.border}`, padding: "8px 0" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: fs(12.5), fontWeight: 700 }}>{c.contact_name || c.email}</div>
+                            <div style={{ fontSize: fs(12.5), fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>{c.contact_name || c.email} <LiBadge li={liInfo(c.ov, c.hs_li)} /></div>
                             <div style={{ fontSize: fs(10.5), color: C.muted }}>{c.title || "—"} · {c.email}</div>
                             <div style={{ fontSize: fs(10.5), color: C.faint, marginTop: 2 }}>
                               last touch {fmtAgo(c.last_touch)}{c.last_by ? ` · ${c.last_by} · ${c.last_channel}` : ""} · {c.touches_14d} touches/14d · {c.calls_total} calls ({c.calls_connected} conn){c.in_sequence ? " · in sequence" : ""}
-                              {c.ov?.linkedin_status ? ` · LI: ${c.ov.linkedin_status.replace("linkedin_", "").replace("_", " ")}` : ""}
                             </div>
+                            {liInfo(c.ov, c.hs_li).stage > 0 && <div style={{ marginTop: 3 }}><LiTimeline li={liInfo(c.ov, c.hs_li)} /></div>}
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "flex-start", flexWrap: "wrap" }}>
                             <a href={HS_CONTACT(c.contact_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none", padding: "2px 7px" }}>HS</a>
@@ -3096,6 +3171,7 @@ function SignalFeed() {
   const [plan, setPlan] = useDiveState<string>("plan", "any");
   const [touchedBy, setTouchedBy] = useDiveState<string>("touchedBy", "any");
   const [ctOwner, setCtOwner] = useDiveState<string>("ctOwner", "any");
+  const [liF, setLiF] = useDiveState<string>("liF", "any");
   const [fresh, setFresh] = useDiveState<string>("fresh", "any");
   const [createdWin, setCreatedWin] = useDiveState<string>("created", "any");
   const [hasLi, setHasLi] = useDiveState<boolean>("hasLi", false);
@@ -3175,7 +3251,7 @@ function SignalFeed() {
       patch.retouch_on = d.toISOString().slice(0, 10); patch.retouch_event_ts = T(now);
     }
     if (type === "retouch_clear") { patch.retouch_on = null; patch.retouch_event_ts = T(now); }
-    if (type.startsWith("linkedin_")) { patch.linkedin_status = type; patch.last_linkedin_ts = T(now); patch.last_linkedin_actor = acting; patch.linkedin_14d = (r.ov?.linkedin_14d ?? 0) + 1; }
+    if (type.startsWith("linkedin_")) { patch.linkedin_status = type; patch.last_linkedin_ts = T(now); patch.last_linkedin_actor = acting; patch.linkedin_14d = (r.ov?.linkedin_14d ?? 0) + 1; patch.li_hist = [...(r.ov?.li_hist ?? []), { t: type, ts: T(now), by: acting }]; }
     if (type === "note") { patch.last_note = extra.note; patch.last_note_ts = T(now); }
     setPending((p) => ({ ...p, [r.contact_id]: { ...(p[r.contact_id] ?? {}), ...patch } }));
     // optimistic state holds for 15 min so a slow share sync never flips the contact back
@@ -3222,6 +3298,7 @@ function SignalFeed() {
       if (opened === "clicked" && !(r.last_clicked != null && (r.last_touch == null || r.last_clicked > r.last_touch))) return false;
     }
     if (pages.length && !pages.some((p) => r.page_cats.includes(p))) return false;
+    if (liF !== "any" && !liMatches(liF, liInfo(r.ov, r.hs_li))) return false;
     if (ctOwner !== "any" && (ctOwner === "same" ? r.owner_id !== r.queue_owner_id : ctOwner === "other" ? r.owner_id === r.queue_owner_id : r.owner_id !== ctOwner)) return false;
     if (touchedBy !== "any") {
       const id = r.last_by_id;
@@ -3296,9 +3373,9 @@ function SignalFeed() {
     const list = [...m.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => [id, `${e.name} (${e.n})`] as [string, string]);
     return [["any", "anyone"], ["same", "same as BDR owner"], ["other", "someone else"], ...list];
   })();
-  const activeFilters = sigSel.length + (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) +
+  const activeFilters = sigSel.length + (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) + (liF !== "any" ? 1 : 0) +
     (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (search ? 1 : 0) + (opened !== "any" ? 1 : 0) + (pages.length ? 1 : 0);
-  const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
+  const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setLiF("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
 
   // HubSpot bar: lives inside the dialog box in the Unova theme, in the header otherwise.
   const hsButtons = (
@@ -3392,6 +3469,7 @@ function SignalFeed() {
             style={{ background: "transparent", color: C.text, border: "none", outline: "none", fontSize: fs(11.5), fontFamily: "inherit", width: 170 }} />
         </div>
         <Select label="Contact owner" value={ctOwner} onChange={setCtOwner} options={ctOwnerOptions} />
+        <Select label="LinkedIn" value={liF} onChange={setLiF} options={LI_FILTER_OPTS} />
         <Select label="Last touch by" value={touchedBy} onChange={setTouchedBy} options={[["any", "anyone"], ["me", "me (acting)"], ["owner", "queue owner"], ["other_bdr", "another BDR"], ["ae", "AE / non-BDR"], ["never", "never touched"]]} />
         <Select label="Freshness" value={fresh} onChange={setFresh} options={[["any", "any"], ["never", "never touched"], ["gt3", "> 3d since touch"], ["gt7", "> 7d since touch"], ["le7", "touched ≤ 7d"]]} />
         <Select label="Email opened" value={opened} onChange={setOpened} options={[["any", "any"], ["since_touch", "since our last touch"], ["le1", "≤ 1d ago"], ["le3", "≤ 3d ago"], ["le7", "≤ 7d ago"], ["clicked", "clicked since last touch"], ["never", "never opened"]]} />
@@ -3451,6 +3529,7 @@ function SignalFeed() {
                       {r.linkedin_url
                         ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} title="Open LinkedIn (l)" style={miniLink("#5fb3ff")}><Linkedin size={10} /></a>
                         : <span title="No LinkedIn on file" style={{ ...miniLink(C.faint), opacity: 0.35, cursor: "default" }}><Linkedin size={10} /></span>}
+                      <LiBadge li={liInfo(r.ov, r.hs_li)} />
                       <span style={{ fontSize: fs(10), color: d == null || d > 7 ? C.danger : C.faint }}>{d == null ? "untouched" : `${d}d`}</span>
                     </span>
                   </div>
