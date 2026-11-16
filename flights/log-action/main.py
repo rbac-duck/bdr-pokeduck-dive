@@ -6,7 +6,8 @@ Two input modes:
     -> one Flight run saves many clicks (the Dive queues actions and flushes them together).
   * Single: EVENT_ID / EVENT_TYPE / CONTACT_ID / ... env vars (backward compatible).
 Rules:
-  * Contact actions: only the contact's queue-owner BDR (HubSpot contact owner, or deal bdr_owner).
+  * Contact actions: only the contact's queue-owner BDR (contact BDR Owner, falling back to Contact Owner
+    when BDR Owner is blank, or the deal bdr_owner for no-show contacts).
   * ae_assign: only a BDR who owns at least one contact at that company.
   * draft_saved: payload JSON (subject/body/...) stored as-is after key filtering.
   * Idempotent on event_id. Inputs are untrusted and validated; SQL is parameterized.
@@ -124,7 +125,7 @@ def main():
         if contact_ids:
             owned_contacts = {x[0] for x in con.execute(
                 """
-                SELECT hs_object_id FROM mdw.hubspot.contacts WHERE hs_object_id IN (SELECT unnest(?)) AND hubspot_owner_id = ?
+                SELECT hs_object_id FROM mdw.hubspot.contacts WHERE hs_object_id IN (SELECT unnest(?)) AND COALESCE(NULLIF(bdr_owner, ''), hubspot_owner_id) = ?
                 UNION
                 SELECT dca.contact_id::VARCHAR FROM mdw.hubspot.deal_to_contact_associations dca
                 JOIN mdw.hubspot.deals d ON d.hs_object_id::VARCHAR = dca.deal_id::VARCHAR
@@ -132,7 +133,7 @@ def main():
                 """, [contact_ids, actor, contact_ids, actor]).fetchall()}
         if company_ids:
             owned_companies = {x[0] for x in con.execute(
-                "SELECT DISTINCT associatedcompanyid FROM mdw.hubspot.contacts WHERE associatedcompanyid IN (SELECT unnest(?)) AND hubspot_owner_id = ?",
+                "SELECT DISTINCT associatedcompanyid FROM mdw.hubspot.contacts WHERE associatedcompanyid IN (SELECT unnest(?)) AND COALESCE(NULLIF(bdr_owner, ''), hubspot_owner_id) = ?",
                 [company_ids, actor]).fetchall()}
         ok_rows = []
         for r in rows:

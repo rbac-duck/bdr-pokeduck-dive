@@ -74,6 +74,7 @@ const SIG: Record<string, { color: string; Icon: any }> = {
   "Onboarding booked": { color: "#b197fc", Icon: CalendarPlus },
   "High AWR": { color: "#38d9a9", Icon: Coins },
   "Hand-raiser": { color: "#ff4d94", Icon: Hand },
+  "Business offer request": { color: "#e03131", Icon: Coins },
   "Event attended": { color: "#4dabf7", Icon: Ticket },
   "Event no-show": { color: "#74c0fc", Icon: Ticket },
   "Event registered": { color: "#a5d8ff", Icon: Ticket },
@@ -89,7 +90,7 @@ const chipKey = (s: string) => (s.startsWith("Converted") ? "Converted" : s === 
 const CHIPS: [string, string][] = [
   ["New lead", "#f783ac"], ["Outcome unresolved", "#ff8f6b"], ["Email reply", "#5fb3ff"], ["Trial spike", "#ffa94d"],
   ["Trial extension", "#ffd43b"], ["Converted", "#69db7c"], ["Onboarding booked", "#b197fc"], ["High AWR", "#38d9a9"],
-  ["Hand-raiser", "#ff4d94"], ["Event", "#4dabf7"], ["Reactivation", "#e599f7"], ["Content download", "#c0eb75"],
+  ["Business offer request", "#e03131"], ["Hand-raiser", "#ff4d94"], ["Event", "#4dabf7"], ["Reactivation", "#e599f7"], ["Content download", "#c0eb75"],
 ];
 
 const BUCKETS: { id: string; label: string; hint: string }[] = [
@@ -131,7 +132,8 @@ const HS_RECIPE: Record<string, string> = {
   "Converted": "NOT IN HUBSPOT: product plan change to Lite/Business/Capacity in the last 30 days",
   "Onboarding booked": "Product onboarding call booked date is less than 30 days ago",
   "High AWR": "NOT IN HUBSPOT: product AWR of $6K or more",
-  "Hand-raiser": "Recent conversion date is less than 30 days ago AND Recent conversion contains any of: Contact Sales, Contact an Expert, Pricing, Demo, Offer request, Waitlist",
+  "Business offer request": "Recent conversion (or First conversion) contains Biz Offer Request AND its date is less than 30 days ago",
+  "Hand-raiser": "Recent conversion date is less than 30 days ago AND Recent conversion contains any of: Contact Sales, Contact an Expert, Pricing, Demo, Waitlist",
   "Event": "Marketing event participation (Attended / Registered / No-show) for an event in the last 21 days or next 14 days",
   "Reactivation": "Reactivation campaign status is known AND Recent sales email replied date / Time last seen / Recent conversion date is after Reactivation sequence enrolled date",
   "Content download": "Recent conversion date is less than 14 days ago AND Recent conversion contains any of: Book, Guide, Cheatsheet, Gated video, Lead Generation",
@@ -143,7 +145,7 @@ const HS_PAGES: Record<string, string> = {
   Homepage: "the homepage", Careers: "/careers",
 };
 function hubspotRecipe(o: { owners: string[]; bucket: string; sigs: string[]; opened: string; pages: string[]; hasLi: boolean; createdWin: string }): string[] {
-  const out = [`Contact owner is any of: ${o.owners.map((id) => bdrName(id)).join(", ")}`];
+  const out = [`BDR Owner is any of: ${o.owners.map((id) => bdrName(id)).join(", ")}`];
   if (o.sigs.length) out.push(o.sigs.length === 1 ? HS_RECIPE[o.sigs[0]] ?? o.sigs[0] : `ANY OF: ${o.sigs.map((s) => `[${HS_RECIPE[s] ?? s}]`).join(" OR ")}`);
   else out.push(`ANY signal (add one filter group per signal): ${Object.keys(HS_RECIPE).filter((k) => !HS_RECIPE[k].startsWith("NOT IN")).join(", ")}`);
   if (o.createdWin !== "any") out.push(`Create date is less than ${o.createdWin} days ago`);
@@ -190,8 +192,9 @@ noshow AS (
   FROM noshow_deals n JOIN "mdw"."hubspot"."deal_to_contact_associations" dca ON dca.deal_id::VARCHAR = n.deal_id
 ),
 c AS (
+  -- queue = BDR Owner (team BDRs only); falls back to Contact Owner when BDR Owner is blank
   SELECT ct.* FROM "mdw"."hubspot"."contacts" ct
-  WHERE ct.hubspot_owner_id IN (SELECT owner_id FROM owners_sel)
+  WHERE COALESCE(NULLIF(ct.bdr_owner,''), ct.hubspot_owner_id) IN (SELECT owner_id FROM owners_sel)
      OR ct.hs_object_id IN (SELECT contact_id FROM noshow)
      OR ct.hs_object_id IN (${extraSql})
 ),
@@ -295,7 +298,7 @@ signals AS (
   UNION ALL
   SELECT c.hs_object_id, 0, 'New lead', c.created_at, NULL
   FROM c LEFT JOIN touch_agg t ON t.contact_id = c.hs_object_id
-  WHERE c.created_at >= now()::TIMESTAMP - INTERVAL 3 DAY AND c.hubspot_owner_id IN (SELECT owner_id FROM owners_sel)
+  WHERE c.created_at >= now()::TIMESTAMP - INTERVAL 3 DAY AND COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) IN (SELECT owner_id FROM owners_sel)
     AND (t.first_touch_ts IS NULL OR t.first_touch_ts < c.created_at)
   UNION ALL
   SELECT c.hs_object_id, 2, 'Email reply', c.hs_sales_email_last_replied, NULL
@@ -316,11 +319,18 @@ signals AS (
   SELECT contact_id, 7, 'High AWR', NULL::TIMESTAMP, '$' || CAST(round(awr / 1000, 1) AS VARCHAR) || 'K AWR'
   FROM org_rollup WHERE awr >= 6000
   UNION ALL
-  -- hand-raisers: high-intent forms (contact sales / expert / pricing / offer / waitlist / trial-extension request)
+  -- business offer requests (Biz Offer Request form), as first or most recent conversion in the last 30 days
+  SELECT hs_object_id, 0, 'Business offer request',
+    CASE WHEN COALESCE(recent_conversion_event_name, '') ILIKE '%offer request%' THEN recent_conversion_date ELSE first_conversion_date END,
+    split_part(CASE WHEN COALESCE(recent_conversion_event_name, '') ILIKE '%offer request%' THEN recent_conversion_event_name ELSE first_conversion_event_name END, ' | ', 1)
+  FROM c WHERE (COALESCE(recent_conversion_event_name, '') ILIKE '%offer request%' AND recent_conversion_date >= now()::TIMESTAMP - INTERVAL 30 DAY)
+     OR (COALESCE(first_conversion_event_name, '') ILIKE '%offer request%' AND first_conversion_date >= now()::TIMESTAMP - INTERVAL 30 DAY)
+  UNION ALL
+  -- hand-raisers: high-intent forms (contact sales / expert / pricing / demo / waitlist / trial-extension request)
   SELECT hs_object_id, 0, 'Hand-raiser', recent_conversion_date, split_part(recent_conversion_event_name, ' | ', 1)
   FROM c WHERE recent_conversion_date >= now()::TIMESTAMP - INTERVAL 30 DAY
-    AND regexp_matches(lower(recent_conversion_event_name), 'contact|expert|sales|pricing|demo|offer request|waitlist|trial extension request')
-    AND NOT regexp_matches(lower(recent_conversion_event_name), 'silent-form')
+    AND regexp_matches(lower(recent_conversion_event_name), 'contact|expert|sales|pricing|demo|waitlist|trial extension request')
+    AND NOT regexp_matches(lower(recent_conversion_event_name), 'silent-form|offer request')
   UNION ALL
   -- events in the last 21 days (one row per contact + event, best attendance state wins)
   SELECT contact_id,
@@ -402,7 +412,8 @@ base AS (
 SELECT
   c.hs_object_id AS contact_id,
   c.hubspot_owner_id AS owner_id,
-  COALESCE(CASE WHEN c.hubspot_owner_id IN (SELECT owner_id FROM owners_sel) THEN c.hubspot_owner_id END, nso.bdr_owner, c.hubspot_owner_id) AS queue_owner_id,
+  COALESCE(CASE WHEN COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) IN (SELECT owner_id FROM owners_sel) THEN COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) END, nso.bdr_owner, COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id)) AS queue_owner_id,
+  TRIM(COALESCE(cow.firstName, '') || ' ' || COALESCE(cow.lastName, '')) AS contact_owner_name,
   NULLIF(TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,'')), '') AS contact_name,
   c.email, c.jobtitle,
   COALESCE(co.name, c.company, c.associated_company_domain_name) AS company,
@@ -457,6 +468,7 @@ LEFT JOIN "mdw"."hubspot"."owners" ae ON ae.id = co.assigned_sales_owner_id
 LEFT JOIN org_rollup o ON o.contact_id = c.hs_object_id
 LEFT JOIN touch_agg t ON t.contact_id = c.hs_object_id
 LEFT JOIN "mdw"."hubspot"."owners" lt ON lt.id = t.last_touch_actor_id
+LEFT JOIN "mdw"."hubspot"."owners" cow ON cow.id = c.hubspot_owner_id
 LEFT JOIN sqa_hit hco ON hco.k = 'co:' || c.associatedcompanyid
 LEFT JOIN sqa_hit hc ON hc.k = 'ct:' || c.hs_object_id
 CROSS JOIN LATERAL (SELECT COALESCE(c.hs_analytics_last_url, '') || ' ' || COALESCE(c.hs_analytics_first_url, '') AS u) pg
@@ -481,7 +493,7 @@ type Ov = {
   last_note: string; last_note_ts: number | null;
 };
 type Row = {
-  contact_id: string; owner_id: string; queue_owner_id: string; contact_name: string; email: string; jobtitle: string;
+  contact_id: string; owner_id: string; contact_owner: string; queue_owner_id: string; contact_name: string; email: string; jobtitle: string;
   company: string; linkedin_url: string; ae_name: string; signals: Sig[]; plan: string; org_name: string; org_count: number;
   primary_org_id: string; m_add_data: boolean; m_connect_tools: boolean; m_share_data: boolean; cpu_7d: number;
   cpu_prev7d: number; awr: number; trial_end_date: string; lifecycle: string; lead_status: string;
@@ -502,7 +514,7 @@ function toRow(r: any): Row {
     }));
   } catch { sigs = []; }
   return {
-    contact_id: S(r.contact_id), owner_id: S(r.owner_id), queue_owner_id: S(r.queue_owner_id),
+    contact_id: S(r.contact_id), owner_id: S(r.owner_id), contact_owner: S(r.contact_owner_name), queue_owner_id: S(r.queue_owner_id),
     contact_name: S(r.contact_name), email: S(r.email), jobtitle: S(r.jobtitle), company: S(r.company),
     linkedin_url: normUrl(S(r.linkedin_url)), ae_name: S(r.ae_name), signals: sigs, plan: S(r.plan), org_name: S(r.org_name),
     org_count: N(r.org_count), primary_org_id: S(r.primary_org_id), m_add_data: B(r.m_add_data),
@@ -785,8 +797,8 @@ function Card({ r, acting, busy, onAct, runMsg }: { r: Row; acting: string; busy
           <div style={{ fontSize: fs(16.5), fontWeight: 700 }}>{r.contact_name || r.email || "Unknown contact"}</div>
           <div style={{ fontSize: fs(12), color: C.muted, marginTop: 2 }}>{[r.jobtitle, r.company].filter(Boolean).join(" @ ") || "—"}</div>
           <div style={{ fontSize: fs(11), color: C.faint, marginTop: 2 }}>
-            {r.email} · queue: <b style={{ color: C.text }}>{bdrName(r.queue_owner_id)}</b>
-            {r.owner_id !== r.queue_owner_id ? ` · HS owner ${bdrName(r.owner_id)}` : ""}
+            {r.email} · BDR owner: <b style={{ color: C.text }}>{bdrName(r.queue_owner_id)}</b>
+            {r.owner_id && r.owner_id !== r.queue_owner_id ? ` · contact owner ${r.contact_owner || bdrName(r.owner_id)}` : ""}
             {r.ae_name ? ` · AE ${r.ae_name}` : ""}
           </div>
         </div>
@@ -1118,7 +1130,7 @@ mtg AS (
 ),
 apollo AS (
   SELECT ct.hs_object_id AS contact_id, lower(trim(ct.email)) AS addr FROM "mdw"."hubspot"."contacts" ct, params p
-  WHERE ct.hubspot_owner_id = p.bdr AND (ct.contact_source_label = 'Apollo' OR ct.hs_object_source_detail_1 = 'Apollo Integration')
+  WHERE COALESCE(NULLIF(ct.bdr_owner,''), ct.hubspot_owner_id) = p.bdr AND (ct.contact_source_label = 'Apollo' OR ct.hs_object_source_detail_1 = 'Apollo Integration')
 ),
 em AS (
   SELECT TRY_CAST(e.hs_timestamp AS DATE) AS dd, COUNT(*) AS n FROM "mdw"."hubspot"."emails" e, params p
@@ -1417,7 +1429,7 @@ mtg AS (
 apollo AS (
   SELECT ct.hs_object_id AS contact_id, lower(trim(ct.email)) AS addr, COALESCE(NULLIF(ct.associatedcompanyid,''), 'nc:' || ct.hs_object_id) AS company_id
   FROM "mdw"."hubspot"."contacts" ct, params p
-  WHERE ct.hubspot_owner_id = p.bdr AND (ct.contact_source_label = 'Apollo' OR ct.hs_object_source_detail_1 = 'Apollo Integration')
+  WHERE COALESCE(NULLIF(ct.bdr_owner,''), ct.hubspot_owner_id) = p.bdr AND (ct.contact_source_label = 'Apollo' OR ct.hs_object_source_detail_1 = 'Apollo Integration')
 ),
 em_all AS (
   SELECT a.contact_id, a.company_id, TRY_CAST(e.hs_timestamp AS DATE) AS dd
@@ -2106,7 +2118,7 @@ const SIG_TO_TPL: Record<string, string> = {
   "New lead": "new_lead", "No-show": "no_show", "Outcome unresolved": "no_show", "Email reply": "reply_followup",
   "Trial spike": "trial_spike", "Trial extension": "trial_extension", "Converted to Lite": "conversion",
   "Converted to Business": "conversion", "Converted to Capacity": "conversion", "Onboarding booked": "onboarding", "High AWR": "high_awr",
-  "Hand-raiser": "hand_raiser", "Event attended": "event_followup", "Event no-show": "event_followup", "Event registered": "event_followup",
+  "Hand-raiser": "hand_raiser", "Business offer request": "hand_raiser", "Event attended": "event_followup", "Event no-show": "event_followup", "Event registered": "event_followup",
   "Event upcoming": "pre_event", "Reactivation engaged": "reactivation", "Usage reactivated": "reactivation", "Re-signup": "reactivation",
   "Content download": "content_download",
 };
@@ -2600,7 +2612,7 @@ function obSql(ownersSql: string) {
   return `WITH owners_sel AS (SELECT unnest([${ownersSql}]) AS owner_id),
 c AS (
   SELECT ct.* FROM "mdw"."hubspot"."contacts" ct
-  WHERE ct.hubspot_owner_id IN (SELECT owner_id FROM owners_sel)
+  WHERE COALESCE(NULLIF(ct.bdr_owner,''), ct.hubspot_owner_id) IN (SELECT owner_id FROM owners_sel)
     AND (ct.contact_source_label = 'Apollo' OR ct.hs_object_source_detail_1 = 'Apollo Integration')
 ),
 c_emails AS (SELECT hs_object_id AS contact_id, lower(trim(email)) AS addr FROM c WHERE COALESCE(email, '') <> ''),
@@ -2700,7 +2712,7 @@ sqa_hit AS (
   GROUP BY 1
 )
 SELECT
-  c.hs_object_id AS contact_id, c.hubspot_owner_id AS owner_id,
+  c.hs_object_id AS contact_id, COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) AS owner_id,
   NULLIF(TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,'')), '') AS contact_name,
   c.email, COALESCE(NULLIF(c.jobtitle,''), c.ap_title) AS title,
   COALESCE(NULLIF(c.associatedcompanyid,''), 'nocompany:' || c.hs_object_id) AS company_id,
@@ -3083,6 +3095,7 @@ function SignalFeed() {
   const [stage, setStage] = useDiveState<string>("stage", "any");
   const [plan, setPlan] = useDiveState<string>("plan", "any");
   const [touchedBy, setTouchedBy] = useDiveState<string>("touchedBy", "any");
+  const [ctOwner, setCtOwner] = useDiveState<string>("ctOwner", "any");
   const [fresh, setFresh] = useDiveState<string>("fresh", "any");
   const [createdWin, setCreatedWin] = useDiveState<string>("created", "any");
   const [hasLi, setHasLi] = useDiveState<boolean>("hasLi", false);
@@ -3209,6 +3222,7 @@ function SignalFeed() {
       if (opened === "clicked" && !(r.last_clicked != null && (r.last_touch == null || r.last_clicked > r.last_touch))) return false;
     }
     if (pages.length && !pages.some((p) => r.page_cats.includes(p))) return false;
+    if (ctOwner !== "any" && (ctOwner === "same" ? r.owner_id !== r.queue_owner_id : ctOwner === "other" ? r.owner_id === r.queue_owner_id : r.owner_id !== ctOwner)) return false;
     if (touchedBy !== "any") {
       const id = r.last_by_id;
       if (touchedBy === "never" && r.last_touch != null) return false;
@@ -3275,9 +3289,16 @@ function SignalFeed() {
     return () => window.removeEventListener("keydown", onKey);
   });
   const multiOwner = scopeIds.length > 1;
-  const activeFilters = sigSel.length + (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) +
+  // Contact Owner (HubSpot) can be any BDR, AE or GTM person; list the ones in scope, most contacts first
+  const ctOwnerOptions: [string, string][] = (() => {
+    const m = new Map<string, { name: string; n: number }>();
+    scoped.forEach((r) => { if (!r.owner_id) return; const e = m.get(r.owner_id) ?? { name: r.contact_owner || bdrName(r.owner_id), n: 0 }; e.n++; m.set(r.owner_id, e); });
+    const list = [...m.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => [id, `${e.name} (${e.n})`] as [string, string]);
+    return [["any", "anyone"], ["same", "same as BDR owner"], ["other", "someone else"], ...list];
+  })();
+  const activeFilters = sigSel.length + (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) +
     (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (search ? 1 : 0) + (opened !== "any" ? 1 : 0) + (pages.length ? 1 : 0);
-  const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
+  const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
 
   // HubSpot bar: lives inside the dialog box in the Unova theme, in the header otherwise.
   const hsButtons = (
@@ -3370,6 +3391,7 @@ function SignalFeed() {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="name, company, AE, toucher"
             style={{ background: "transparent", color: C.text, border: "none", outline: "none", fontSize: fs(11.5), fontFamily: "inherit", width: 170 }} />
         </div>
+        <Select label="Contact owner" value={ctOwner} onChange={setCtOwner} options={ctOwnerOptions} />
         <Select label="Last touch by" value={touchedBy} onChange={setTouchedBy} options={[["any", "anyone"], ["me", "me (acting)"], ["owner", "queue owner"], ["other_bdr", "another BDR"], ["ae", "AE / non-BDR"], ["never", "never touched"]]} />
         <Select label="Freshness" value={fresh} onChange={setFresh} options={[["any", "any"], ["never", "never touched"], ["gt3", "> 3d since touch"], ["gt7", "> 7d since touch"], ["le7", "touched ≤ 7d"]]} />
         <Select label="Email opened" value={opened} onChange={setOpened} options={[["any", "any"], ["since_touch", "since our last touch"], ["le1", "≤ 1d ago"], ["le3", "≤ 3d ago"], ["le7", "≤ 7d ago"], ["clicked", "clicked since last touch"], ["never", "never opened"]]} />
