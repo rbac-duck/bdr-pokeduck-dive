@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useSQLQuery, useDiveState, useRunFlight, useFlightRun } from "@motherduck/react-sql-query";
 import {
   ExternalLink, Linkedin, Search, AlertTriangle, Mail, TrendingUp, CalendarPlus, Coins, Rocket, Clock,
-  Sparkles, Check, RotateCcw, ChevronDown, StickyNote, ArrowUpDown, X, Lock, Hand, Ticket, RefreshCw, BookOpen,
+  Sparkles, Check, RotateCcw, ChevronDown, StickyNote, ArrowUpDown, X, Lock, Hand, Ticket, RefreshCw, BookOpen, Loader2,
 } from "lucide-react";
 
 export const REQUIRED_DATABASES = [{ type: 'share', path: 'md:_share/mdw/8cdbf94d-7075-45a4-bf57-4fd19470e532', alias: 'mdw' }, { type: 'share', path: 'md:_share/bdr_terminal_gamified/51f8608a-6641-4fde-8847-b2c6bde9f34e', alias: 'bdr_terminal_gamified' }];
@@ -51,7 +51,7 @@ const fs = (n: number) => Math.round(n * UI.scale * 2) / 2;
 const FONT_CSS = `.bdr-root button:active { transform: translateY(1px); }
 .bdr-root select, .bdr-root input, .bdr-root textarea { outline-color: #3878c8; }
 .bdr-root ::selection { background: #3878c8; color: #fff; }
-@keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+@keyframes bdrSpin{to{transform:rotate(360deg)}} @keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
 @keyframes bdrFloat { 0% { opacity: 0; transform: translate(-50%, 6px) } 15% { opacity: 1 } 100% { opacity: 0; transform: translate(-50%, -34px) } }
 @keyframes bdrStripe { from { background-position: 0 0 } to { background-position: 24px 0 } }
 @keyframes bdrPop { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }`;
@@ -606,6 +606,31 @@ function LiTimeline({ li }: { li: LiInfo }) {
   );
 }
 
+// LinkedIn step buttons: spinner while the Flight saves, ✓ once logged. One-time steps lock after logging so they can't be double-counted.
+const LI_BTNS: [string, string, string][] = [["linkedin_request_sent", "Request sent", "LI sent"], ["linkedin_accepted", "Accepted", "LI accepted"], ["linkedin_message", "Messaged", "LI msg"], ["linkedin_reply", "They replied", "LI reply"]];
+const LI_ONCE = new Set(["linkedin_request_sent", "linkedin_accepted"]);
+function LiButtons({ li, cid, dis, pendingKeys, onAct, compact }: { li: LiInfo; cid: string; dis: boolean; pendingKeys?: Set<string>; onAct: (t: string) => void; compact?: boolean }) {
+  return (
+    <>
+      {LI_BTNS.map(([t, full, short]) => {
+        const k = LI_EVT_STAGE[t];
+        const saving = !!pendingKeys?.has(`${cid}:${t}`);
+        const done = !saving && !!li.firstAt[k];
+        const n = li.ev.filter((e) => e.t === t).length;
+        const off = dis || saving || (done && LI_ONCE.has(t));
+        const tip = saving ? "Saving to MotherDuck…" : done ? `Logged ${fmtDay(li.firstAt[k]!.ts)}${LI_ONCE.has(t) ? "" : n > 1 ? ` (${n}×). Click to log another` : ". Click to log another"}` : `Log: ${full}`;
+        return (
+          <button key={t} disabled={off} title={tip} onClick={() => onAct(t)}
+            style={{ ...btn(done ? "#2f9e44" : "#5fb3ff", off && !done && !saving), ...(compact ? { padding: "1px 7px", fontSize: fs(10.5) } : {}), opacity: saving ? 0.75 : 1, cursor: off ? "default" : "pointer" }}>
+            {saving ? <Loader2 size={compact ? 10 : 12} style={{ animation: "bdrSpin 0.9s linear infinite" }} /> : done ? <Check size={compact ? 10 : 12} /> : <Linkedin size={compact ? 10 : 12} />}
+            {" "}{compact ? short : full}{saving ? "…" : !LI_ONCE.has(t) && n > 1 ? ` ×${n}` : ""}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
 const LI_FILTER_OPTS: [string, string][] = [["any", "any"], ["none", "no activity yet"], ["some", "any activity"], ["requested", "requested, not accepted"],
   ["connected", "connected, not messaged"], ["messaged", "messaged, no reply"], ["replied", "replied"]];
 const liMatches = (f: string, li: LiInfo) => f === "any" || (f === "none" ? li.stage === 0 : f === "some" ? li.stage > 0
@@ -850,7 +875,7 @@ function Select({ value, onChange, options, label }: { value: string; onChange: 
 }
 
 // ---- Contact card with actions ----
-function Card({ r, acting, busy, onAct, runMsg }: { r: Row; acting: string; busy: boolean; onAct: (t: string, extra?: any) => void; runMsg: string }) {
+function Card({ r, acting, busy, onAct, runMsg, pendingKeys }: { r: Row; acting: string; busy: boolean; onAct: (t: string, extra?: any) => void; runMsg: string; pendingKeys?: Set<string> }) {
   const [note, setNote] = useState("");
   const [days, setDays] = useState("5");
   const canEdit = r.queue_owner_id === acting;
@@ -979,9 +1004,7 @@ function Card({ r, acting, busy, onAct, runMsg }: { r: Row; acting: string; busy
           {r.ov?.retouch_on && <button disabled={dis} style={btn(C.muted, dis)} onClick={() => onAct("retouch_clear")}>Clear retouch ({r.ov.retouch_on})</button>}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-          {[["linkedin_request_sent", "Request sent"], ["linkedin_accepted", "Accepted"], ["linkedin_message", "Messaged"], ["linkedin_reply", "They replied"]].map(([t, l]) => (
-            <button key={t} disabled={dis} style={btn("#5fb3ff", dis)} onClick={() => onAct(t)}><Linkedin size={12} /> {l}</button>
-          ))}
+          <LiButtons li={liInfo(r.ov, r.hs_li)} cid={r.contact_id} dis={dis} pendingKeys={pendingKeys} onAct={(t) => onAct(t)} />
           <div style={{ flexBasis: "100%", marginTop: 2 }}><LiTimeline li={liInfo(r.ov, r.hs_li)} /></div>
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
@@ -2361,14 +2384,18 @@ function useActionQueue(acting: string, onSaved: () => void, ob = false) {
   const [queue, setQueue] = useState<QEvt[]>([]);
   const [inflightN, setInflightN] = useState(0);
   const [msg, setMsg] = useState("");
+  const [since, setSince] = useState<number | null>(null); // when the oldest unsaved click happened
+  const [, tick] = useState(0);
   const inflight = useRef<QEvt[]>([]);
   const run = useRunFlight(FLIGHT_ID);
   useFlightRun(FLIGHT_ID, run.data?.runNumber, {
     onFinished: (x: any) => {
       const n = inflight.current.length;
-      setMsg(x.status === "SUCCEEDED" ? `✓ saved ${n} action${n === 1 ? "" : "s"}` : "✗ some actions were rejected (only the queue owner can write)");
+      const at = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+      setMsg(x.status === "SUCCEEDED" ? `✓ saved ${n} action${n === 1 ? "" : "s"} at ${at}` : "✗ some actions were rejected (only the queue owner can write)");
       inflight.current = [];
       setInflightN(0);
+      setSince((s0) => (queueRef.current.length ? Date.now() : null));
       onSaved();
       window.dispatchEvent(new CustomEvent("bdr-xp-saved", { detail: { bdr: acting } }));
     },
@@ -2384,13 +2411,25 @@ function useActionQueue(acting: string, onSaved: () => void, ob = false) {
     }, 900);
     return () => clearTimeout(t);
   }, [queue, inflightN, acting]);
+  const queueRef = useRef<QEvt[]>([]);
+  queueRef.current = queue;
+  const pendingN = queue.length + inflightN;
+  // tick once a second while saving so the elapsed counter moves (Flight runs take ~5-10s end to end)
+  useEffect(() => {
+    if (!pendingN) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [pendingN]);
   const enqueue = (e: Omit<QEvt, "event_id">) => {
+    setSince((s0) => s0 ?? Date.now());
     setQueue((q) => [...q, { event_id: newEventId(), ...e }]);
     const gain = xpForEvent(e.event_type, ob);
     if (gain) window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, ob, kind: gain[0], xp: gain[1] } }));
   };
-  const pendingN = queue.length + inflightN;
-  return { enqueue, pendingN, msg: pendingN ? `saving ${pendingN}…` : msg };
+  const pendingKeys = new Set([...queue, ...inflight.current].map((e) => `${e.contact_id ?? e.company_id}:${e.event_type}`));
+  const secs = since ? Math.max(0, Math.round((Date.now() - since) / 1000)) : 0;
+  const saving = `⏳ saving ${pendingN} action${pendingN === 1 ? "" : "s"}… ${secs}s${secs < 15 ? " · usually ~8s" : " · still running, don't re-click"}`;
+  return { enqueue, pendingN, pendingKeys, msg: pendingN ? saving : msg };
 }
 
 // Saves a draft (AI original + your final edit) to MotherDuck via the Flight. Never touches HubSpot.
@@ -3133,9 +3172,7 @@ function OutboundFeed() {
                           {c.signals.map((s) => <ObTag key={s.sig} s={s} />)}
                         </div>
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
-                          {[["linkedin_request_sent", "LI sent"], ["linkedin_accepted", "LI accepted"], ["linkedin_message", "LI msg"], ["linkedin_reply", "LI reply"]].map(([t, l]) => (
-                            <button key={t} disabled={dis} onClick={() => actContact(c, t)} style={{ ...btn("#5fb3ff", dis), padding: "1px 7px", fontSize: fs(10.5) }}>{l}</button>
-                          ))}
+                          <LiButtons li={liInfo(c.ov, c.hs_li ?? "")} cid={c.contact_id} dis={dis} pendingKeys={aq.pendingKeys} onAct={(t) => actContact(c, t)} compact />
                           {[3, 7, 14].map((dd) => <button key={dd} disabled={dis} onClick={() => actContact(c, "retouch_set", { days: dd })} style={{ ...btn(C.warn, dis), padding: "1px 7px", fontSize: fs(10.5) }}>↻ {dd}d</button>)}
                           {c.ov?.retouch_on && <button disabled={dis} onClick={() => actContact(c, "retouch_clear")} style={{ ...btn(C.muted, dis), padding: "1px 7px", fontSize: fs(10.5) }}>clear ↻ {c.ov.retouch_on}</button>}
                           {!mine && <span style={{ fontSize: fs(10), color: C.faint, alignSelf: "center" }}><Lock size={10} /> {bdrName(c.owner_id)}'s contact</span>}
@@ -3553,7 +3590,7 @@ function SignalFeed() {
           </div>
           <div style={{ position: "sticky", top: 8, alignSelf: "start" }}>
             {firstLoad ? <div className="animate-pulse" style={{ height: 460, background: C.surface, borderRadius: UI.radius }} />
-              : current ? <Card key={current.contact_id} r={current} acting={acting} busy={busy} onAct={(t, x) => act(current, t, x)} runMsg={aq.msg} />
+              : current ? <Card key={current.contact_id} r={current} acting={acting} busy={busy} onAct={(t, x) => act(current, t, x)} runMsg={aq.msg} pendingKeys={aq.pendingKeys} />
               : <div style={{ fontSize: fs(12), color: C.muted }}>Select a contact.</div>}
           </div>
         </div>
