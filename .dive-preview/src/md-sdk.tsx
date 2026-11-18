@@ -268,21 +268,42 @@ export function useDiveState<T>(key: string, initial: T): [T, (v: T | ((p: T) =>
 
 // ── Flights (local stubs) ──────────────────────────────────────────
 // Runs are not executed locally; each run "succeeds" after a short delay and logs its config.
+// ?flightFail=<mode> in the preview URL simulates failures (for testing retry handling):
+//   start  -> run()/runAsync() errors before a run is created (like an API/permission failure)
+//   silent -> the call never resolves and no run is created
+//   hang   -> a run number comes back but the run never reports finished
+//   once   -> the first start fails, later ones succeed
 
 const fakeRuns = new Map<string, { status: string }>();
 let fakeRunCounter = 0;
+let fakeStartCalls = 0;
+const failMode = () => new URLSearchParams(location.search).get("flightFail") || "";
 
 export function useRunFlight(flightId: string) {
   const [data, setData] = useState<{ runNumber: number } | undefined>();
   const [isPending, setPending] = useState(false);
-  const run = useCallback((config?: Record<string, string>) => {
-    const runNumber = ++fakeRunCounter;
-    console.info(`[preview] flight ${flightId} run #${runNumber} (not executed)`, config);
-    fakeRuns.set(`${flightId}:${runNumber}`, { status: "SUCCEEDED" });
-    setPending(true);
-    setTimeout(() => { setData({ runNumber }); setPending(false); }, 300);
+  const [error, setError] = useState<Error | null>(null);
+  const runAsync = useCallback((config?: Record<string, string>) => {
+    const mode = failMode();
+    const call = ++fakeStartCalls;
+    setPending(true); setError(null);
+    return new Promise<{ runNumber: number }>((resolve, reject) => {
+      if (mode === "silent") { console.warn("[preview] flight start swallowed (flightFail=silent)"); return; }
+      setTimeout(() => {
+        if (mode === "start" || (mode === "once" && call === 1)) {
+          const e = new Error("simulated: could not start run");
+          console.warn(`[preview] flight ${flightId} start failed`, config);
+          setError(e); setPending(false); reject(e); return;
+        }
+        const runNumber = ++fakeRunCounter;
+        console.info(`[preview] flight ${flightId} run #${runNumber} (not executed)`, config);
+        fakeRuns.set(`${flightId}:${runNumber}`, { status: mode === "hang" ? "RUNNING" : "SUCCEEDED" });
+        setData({ runNumber }); setPending(false); resolve({ runNumber });
+      }, 300);
+    });
   }, [flightId]);
-  return { run, data, isPending, error: null as Error | null };
+  const run = useCallback((config?: Record<string, string>) => { runAsync(config).catch(() => {}); }, [runAsync]);
+  return { run, runAsync, mutate: run, mutateAsync: runAsync, data, isPending, error };
 }
 
 export function useFlightRun(
@@ -298,6 +319,7 @@ export function useFlightRun(
     setChecking(true);
     const t = setTimeout(() => {
       const r = fakeRuns.get(`${flightId}:${runNumber}`) ?? { status: "SUCCEEDED" };
+      if (r.status === "RUNNING") return; // flightFail=hang: never finishes
       setChecking(false);
       cb.current?.({ status: r.status, runNumber });
     }, 400);

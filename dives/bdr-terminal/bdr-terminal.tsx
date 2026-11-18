@@ -875,7 +875,7 @@ function Select({ value, onChange, options, label }: { value: string; onChange: 
 }
 
 // ---- Contact card with actions ----
-function Card({ r, acting, busy, onAct, runMsg, pendingKeys }: { r: Row; acting: string; busy: boolean; onAct: (t: string, extra?: any) => void; runMsg: string; pendingKeys?: Set<string> }) {
+function Card({ r, acting, busy, onAct, runMsg, pendingKeys, stuck, onRetry }: { r: Row; acting: string; busy: boolean; onAct: (t: string, extra?: any) => void; runMsg: string; pendingKeys?: Set<string>; stuck?: boolean; onRetry?: () => void }) {
   const [note, setNote] = useState("");
   const [days, setDays] = useState("5");
   const canEdit = r.queue_owner_id === acting;
@@ -1015,7 +1015,7 @@ function Card({ r, acting, busy, onAct, runMsg, pendingKeys }: { r: Row; acting:
           </button>
         </div>
         {r.ov?.last_note && <div style={{ fontSize: fs(10.5), color: C.muted, marginTop: 6 }}>Last note ({fmtAgo(r.ov.last_note_ts)}): {r.ov.last_note}</div>}
-        {runMsg && <div style={{ fontSize: fs(10.5), color: runMsg.startsWith("✗") ? C.danger : C.accent, marginTop: 6 }}>{runMsg}</div>}
+        <SaveStatus msg={runMsg} stuck={stuck} onRetry={onRetry} block />
       </Section>
 
       <div id={`draft-${r.contact_id}`}>
@@ -2379,40 +2379,106 @@ function FlagLine({ flags }: { flags: string[] }) {
 }
 
 // ---- Action queue: clicks are instant (optimistic); events are batched into one Flight run ----
-type QEvt = { event_id: string; event_type: string; contact_id?: string; company_id?: string; ae_id?: string; retouch_days?: string; note?: string };
+// Reliability: unsaved events are kept in this browser (localStorage) so a reload resends them; a failed or
+// silent run is requeued and retried with backoff. Resending is safe: the Flight does INSERT OR IGNORE on event_id.
+type QEvt = { event_id: string; event_type: string; contact_id?: string; company_id?: string; ae_id?: string; retouch_days?: string; note?: string; by?: string };
+const RUN_START_TIMEOUT = 20000;   // no run number back from the Flight API by then -> retry
+const RUN_FINISH_TIMEOUT = 180000; // run never reported finished (e.g. status checks failing) -> retry
+const MAX_AUTO_RETRIES = 5;
+const errText = (e: any) => String(e?.message ?? e ?? "unknown error").slice(0, 120);
+const lsGet = (k: string): QEvt[] => { try { const v = JSON.parse(localStorage.getItem(k) || "[]"); return Array.isArray(v) ? v.filter((e) => e && e.event_id && e.event_type) : []; } catch { return []; } };
+const lsSet = (k: string, v: QEvt[]) => { try { v.length ? localStorage.setItem(k, JSON.stringify(v)) : localStorage.removeItem(k); } catch { /* storage blocked: queue still works in memory */ } };
+const flightConfig = (actor: string, batch: QEvt[]) => ({ ACTOR_BDR_ID: actor, BATCH: JSON.stringify(batch.map(({ by, ...e }) => e)),
+  EVENT_ID: "", EVENT_TYPE: "", CONTACT_ID: "", COMPANY_ID: "", AE_ID: "", RETOUCH_DAYS: "", NOTE: "", PAYLOAD: "" });
+// Start a run and resolve to its run number. Prefer runAsync (rejects on failure); fall back to run() + run.error.
+function startRun(run: any, config: Record<string, string>): Promise<number | undefined> {
+  if (typeof run.runAsync === "function") return run.runAsync(config).then((d: any) => d?.runNumber);
+  if (typeof run.mutateAsync === "function") return run.mutateAsync(config).then((d: any) => d?.runNumber);
+  run.run(config);
+  return Promise.resolve(undefined);
+}
+
 function useActionQueue(acting: string, onSaved: () => void, ob = false) {
-  const [queue, setQueue] = useState<QEvt[]>([]);
+  const lsKey = `bdr-terminal:unsaved:${ob ? "ob" : "in"}`;
+  const [queue, setQueue] = useState<QEvt[]>(() => lsGet(lsKey));
   const [inflightN, setInflightN] = useState(0);
   const [msg, setMsg] = useState("");
-  const [since, setSince] = useState<number | null>(null); // when the oldest unsaved click happened
+  const [stuck, setStuck] = useState(false);
+  const [since, setSince] = useState<number | null>(() => (lsGet(lsKey).length ? Date.now() : null));
   const [, tick] = useState(0);
   const inflight = useRef<QEvt[]>([]);
+  const activeRun = useRef<number | undefined>(undefined); // run number of the batch in flight
+  const watchdog = useRef<any>(null);
+  const attempts = useRef(0);
+  const queueRef = useRef<QEvt[]>([]);
+  queueRef.current = queue;
   const run = useRunFlight(FLIGHT_ID);
+
+  // persist everything not yet confirmed saved (queued + in flight)
+  useEffect(() => { lsSet(lsKey, [...inflight.current, ...queue]); }, [queue, inflightN, lsKey]);
+
+  const requeue = (why: string) => {
+    clearTimeout(watchdog.current);
+    const back = inflight.current;
+    inflight.current = [];
+    activeRun.current = undefined;
+    attempts.current += 1;
+    const giveUp = attempts.current > MAX_AUTO_RETRIES;
+    setStuck(giveUp);
+    setQueue((q) => [...back, ...q.filter((e) => !back.some((x) => x.event_id === e.event_id))]);
+    setInflightN(0);
+    setMsg(giveUp ? `✗ couldn't save (${why}). Your actions are kept in this browser.` : `✗ couldn't save (${why}), retrying…`);
+  };
+
+  // when the run number comes back from the polling hook, watch for finish
   useFlightRun(FLIGHT_ID, run.data?.runNumber, {
     onFinished: (x: any) => {
+      if (x?.runNumber != null && activeRun.current != null && x.runNumber !== activeRun.current) return; // stale run (already requeued)
+      if (!inflight.current.length) return;
+      clearTimeout(watchdog.current);
+      attempts.current = 0;
+      setStuck(false);
       const n = inflight.current.length;
       const at = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
       setMsg(x.status === "SUCCEEDED" ? `✓ saved ${n} action${n === 1 ? "" : "s"} at ${at}` : "✗ some actions were rejected (only the queue owner can write)");
       inflight.current = [];
+      activeRun.current = undefined;
       setInflightN(0);
-      setSince((s0) => (queueRef.current.length ? Date.now() : null));
+      setSince(queueRef.current.length ? Date.now() : null);
       onSaved();
       window.dispatchEvent(new CustomEvent("bdr-xp-saved", { detail: { bdr: acting } }));
     },
   });
+
+  // flush: one batch at a time, all from the same BDR, with backoff after failures
   useEffect(() => {
-    if (inflight.current.length || !queue.length) return;
+    if (inflight.current.length || !queue.length || stuck) return;
+    const delay = attempts.current ? Math.min(900 * 2 ** attempts.current, 30000) : 900;
     const t = setTimeout(() => {
-      const batch = queue.slice(0, 50);
+      const actor = queue[0].by || acting;
+      const batch = queue.filter((e) => (e.by || acting) === actor).slice(0, 50);
       inflight.current = batch;
+      activeRun.current = undefined;
       setInflightN(batch.length);
-      setQueue((q) => q.slice(batch.length));
-      run.run({ ACTOR_BDR_ID: acting, BATCH: JSON.stringify(batch), EVENT_ID: "", EVENT_TYPE: "", CONTACT_ID: "", COMPANY_ID: "", AE_ID: "", RETOUCH_DAYS: "", NOTE: "", PAYLOAD: "" });
-    }, 900);
+      setQueue((q) => q.filter((e) => !batch.includes(e)));
+      watchdog.current = setTimeout(() => { if (inflight.current === batch && activeRun.current == null) requeue("no run started"); }, RUN_START_TIMEOUT);
+      let p: Promise<number | undefined>;
+      try { p = startRun(run, flightConfig(actor, batch)); } catch (e) { requeue(errText(e)); return; }
+      p.then((rn) => {
+        if (inflight.current !== batch) return;
+        if (rn == null) return; // run() fallback: run.error / the start watchdog cover failure
+        activeRun.current = rn;
+        clearTimeout(watchdog.current);
+        watchdog.current = setTimeout(() => { if (inflight.current === batch) requeue("run never reported back"); }, RUN_FINISH_TIMEOUT);
+      }).catch((e) => { if (inflight.current === batch) requeue(errText(e)); });
+    }, delay);
     return () => clearTimeout(t);
-  }, [queue, inflightN, acting]);
-  const queueRef = useRef<QEvt[]>([]);
-  queueRef.current = queue;
+  }, [queue, inflightN, acting, stuck]);
+
+  // run() fallback path: surface start errors immediately instead of waiting for the watchdog
+  useEffect(() => { if (run.error && inflight.current.length && activeRun.current == null) requeue(errText(run.error)); }, [run.error]);
+  useEffect(() => () => clearTimeout(watchdog.current), []);
+
   const pendingN = queue.length + inflightN;
   // tick once a second while saving so the elapsed counter moves (Flight runs take ~5-10s end to end)
   useEffect(() => {
@@ -2422,33 +2488,75 @@ function useActionQueue(acting: string, onSaved: () => void, ob = false) {
   }, [pendingN]);
   const enqueue = (e: Omit<QEvt, "event_id">) => {
     setSince((s0) => s0 ?? Date.now());
-    setQueue((q) => [...q, { event_id: newEventId(), ...e }]);
+    setQueue((q) => [...q, { event_id: newEventId(), by: acting, ...e }]);
     const gain = xpForEvent(e.event_type, ob);
     if (gain) window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, ob, kind: gain[0], xp: gain[1] } }));
   };
+  const retry = () => { attempts.current = 0; setStuck(false); setMsg(""); setSince(Date.now()); };
   const pendingKeys = new Set([...queue, ...inflight.current].map((e) => `${e.contact_id ?? e.company_id}:${e.event_type}`));
   const secs = since ? Math.max(0, Math.round((Date.now() - since) / 1000)) : 0;
-  const saving = `⏳ saving ${pendingN} action${pendingN === 1 ? "" : "s"}… ${secs}s${secs < 15 ? " · usually ~8s" : " · still running, don't re-click"}`;
-  return { enqueue, pendingN, pendingKeys, msg: pendingN ? saving : msg };
+  const saving = msg.startsWith("✗") ? `${msg} · ${pendingN} unsaved`
+    : `⏳ saving ${pendingN} action${pendingN === 1 ? "" : "s"}… ${secs}s${secs < 15 ? " · usually ~8s" : " · still running, don't re-click"}`;
+  return { enqueue, pendingN, pendingKeys, stuck, retry, msg: pendingN ? saving : msg };
+}
+
+// Status line for the queue, with a Retry button once automatic retries are exhausted
+function SaveStatus({ msg, stuck, onRetry, block }: { msg: string; stuck?: boolean; onRetry?: () => void; block?: boolean }) {
+  if (!msg) return null;
+  const bad = msg.startsWith("✗");
+  return (
+    <span style={{ fontSize: fs(10.5), color: bad ? C.danger : C.accent, display: block ? "block" : "inline", marginTop: block ? 6 : 0 }}>
+      {block ? "" : " · "}{msg}
+      {stuck && onRetry && <button onClick={onRetry} style={{ ...btn(C.danger), padding: "0 7px", marginLeft: 6, fontSize: fs(10.5) }}>Retry</button>}
+    </span>
+  );
 }
 
 // Saves a draft (AI original + your final edit) to MotherDuck via the Flight. Never touches HubSpot.
+// Same failure handling as the queue: errors and silent runs end the "saving…" state; a retry reuses the event_id.
 function useDraftSaver(acting: string) {
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
   const run = useRunFlight(FLIGHT_ID);
-  const st = useFlightRun(FLIGHT_ID, run.data?.runNumber, {
-    onFinished: (x: any) => setMsg(x.status === "SUCCEEDED" ? "✓ draft saved to MotherDuck" : "✗ draft not saved"),
+  const last = useRef<Record<string, string> | null>(null);
+  const activeRun = useRef<number | undefined>(undefined);
+  const watchdog = useRef<any>(null);
+  const fail = (why: string) => { clearTimeout(watchdog.current); activeRun.current = undefined; setBusy(false); setMsg(`✗ draft not saved (${why}). Click save to retry.`); };
+  useFlightRun(FLIGHT_ID, run.data?.runNumber, {
+    onFinished: (x: any) => {
+      if (x?.runNumber != null && activeRun.current != null && x.runNumber !== activeRun.current) return;
+      clearTimeout(watchdog.current);
+      setBusy(false);
+      if (x.status === "SUCCEEDED") { last.current = null; setMsg("✓ draft saved to MotherDuck"); } else setMsg("✗ draft not saved");
+    },
   });
+  useEffect(() => { if (run.error && busy && activeRun.current == null) fail(errText(run.error)); }, [run.error]);
+  useEffect(() => () => clearTimeout(watchdog.current), []);
   const save = (contactId: string, ownerId: string, p: any) => {
+    if (busy) return;
     if (ownerId !== acting) { setMsg("not saved: only the queue owner's drafts are stored"); return; }
     if (!/^\d+$/.test(contactId) || !String(p.body || "").trim()) return;
     const clip = (v: any) => String(v ?? "").slice(0, 6000);
     const safe = { ...p, subject: clip(p.subject).slice(0, 300), body: clip(p.body), ai_subject: clip(p.ai_subject).slice(0, 300), ai_body: clip(p.ai_body) };
+    const payload = JSON.stringify(safe);
+    // retrying the same unsaved draft keeps its event_id so it can't be stored twice
+    const eid = last.current && last.current.CONTACT_ID === contactId && last.current.PAYLOAD === payload ? last.current.EVENT_ID : newEventId();
+    const config = { EVENT_ID: eid, ACTOR_BDR_ID: acting, CONTACT_ID: contactId, COMPANY_ID: "", AE_ID: "", EVENT_TYPE: "draft_saved", RETOUCH_DAYS: "", NOTE: "", PAYLOAD: payload };
+    last.current = config;
+    activeRun.current = undefined;
+    setBusy(true);
     setMsg("saving draft…");
-    run.run({ EVENT_ID: newEventId(), ACTOR_BDR_ID: acting, CONTACT_ID: contactId, COMPANY_ID: "", AE_ID: "", EVENT_TYPE: "draft_saved",
-      RETOUCH_DAYS: "", NOTE: "", PAYLOAD: JSON.stringify(safe) });
+    watchdog.current = setTimeout(() => { if (activeRun.current == null) fail("no run started"); }, RUN_START_TIMEOUT);
+    let pr: Promise<number | undefined>;
+    try { pr = startRun(run, config); } catch (e) { fail(errText(e)); return; }
+    pr.then((rn) => {
+      if (rn == null) return;
+      activeRun.current = rn;
+      clearTimeout(watchdog.current);
+      watchdog.current = setTimeout(() => fail("run never reported back"), RUN_FINISH_TIMEOUT);
+    }).catch((e) => fail(errText(e)));
   };
-  return { save, msg, busy: run.isPending || st.isChecking };
+  return { save, msg, busy };
 }
 
 function DraftsTab() {
@@ -3037,7 +3145,7 @@ function OutboundFeed() {
             {" · queues + acting-as follow the Signal Feed selectors"}
           </div>
         </div>
-        {runMsg && <span style={{ fontSize: fs(10.5), color: runMsg.startsWith("✗") ? C.danger : C.accent }}>{runMsg}</span>}
+        <SaveStatus msg={runMsg} stuck={aq.stuck} onRetry={aq.retry} block />
       </div>
 
       {!loading && (
@@ -3453,7 +3561,7 @@ function SignalFeed() {
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {firstLoad ? "loading…" : `${scoped.length} contacts in scope · ${bucketCounts.active ?? 0} active · ${bucketCounts.retouch_due ?? 0} retouch due`}
             {ovQ.isError ? " · overlay unavailable (read-only)" : ""}
-            {aq.msg ? <span style={{ color: aq.msg.startsWith("✗") ? C.danger : C.accent }}> · {aq.msg}</span> : null}
+            <SaveStatus msg={aq.msg} stuck={aq.stuck} onRetry={aq.retry} />
           </div>
           {!UI.game && hsButtons}
           {!UI.game && hsPanels}
@@ -3590,7 +3698,7 @@ function SignalFeed() {
           </div>
           <div style={{ position: "sticky", top: 8, alignSelf: "start" }}>
             {firstLoad ? <div className="animate-pulse" style={{ height: 460, background: C.surface, borderRadius: UI.radius }} />
-              : current ? <Card key={current.contact_id} r={current} acting={acting} busy={busy} onAct={(t, x) => act(current, t, x)} runMsg={aq.msg} pendingKeys={aq.pendingKeys} />
+              : current ? <Card key={current.contact_id} r={current} acting={acting} busy={busy} onAct={(t, x) => act(current, t, x)} runMsg={aq.msg} pendingKeys={aq.pendingKeys} stuck={aq.stuck} onRetry={aq.retry} />
               : <div style={{ fontSize: fs(12), color: C.muted }}>Select a contact.</div>}
           </div>
         </div>
