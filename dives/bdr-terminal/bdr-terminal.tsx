@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSQLQuery, useDiveState, useRunFlight, useFlightRun } from "@motherduck/react-sql-query";
 import {
   ExternalLink, Linkedin, Search, AlertTriangle, Mail, TrendingUp, CalendarPlus, Coins, Rocket, Clock,
-  Sparkles, Check, RotateCcw, ChevronDown, StickyNote, ArrowUpDown, X, Lock, Hand, Ticket, RefreshCw, BookOpen,
+  Sparkles, Check, RotateCcw, ChevronDown, StickyNote, ArrowUpDown, X, Lock, Hand, Ticket, RefreshCw, BookOpen, Loader2, SlidersHorizontal,
 } from "lucide-react";
 
 export const REQUIRED_DATABASES = [{ type: 'share', path: 'md:_share/mdw/8cdbf94d-7075-45a4-bf57-4fd19470e532', alias: 'mdw' }, { type: 'share', path: 'md:_share/bdr_terminal_gamified/51f8608a-6641-4fde-8847-b2c6bde9f34e', alias: 'bdr_terminal_gamified' }];
@@ -33,28 +33,75 @@ const THEME_TERMINAL = {
   danger: "#ff6b5b", warn: "#ffd43b", ok: "#69db7c",
 };
 const THEME_UNOVA = {
-  page: "#f0f0f0", surface: "#ffffff", surfaceAlt: "#f2f2f2", border: "#c8c8c8",
-  text: "#303030", muted: "#585858", faint: "#888888", accent: "#3878c8", accentDim: "#dce8f8",
-  danger: "#d84040", warn: "#c87810", ok: "#3a9a4a",
+  page: "#f3f4f6", surface: "#ffffff", surfaceAlt: "#f6f7f9", border: "#d5d9df",
+  text: "#1f2329", muted: "#4f5762", faint: "#7c8591", accent: "#3878c8", accentDim: "#e3edf9",
+  danger: "#c93636", warn: "#b86e0a", ok: "#2f8a40",
 };
 const C: any = { ...THEME_UNOVA };
 // typography / shape tokens; mutated by applyTheme() at the top of every render
-// Dives load no external fonts (only sans / serif / mono), so the game theme uses the mono stack
+// Dives load no external fonts (only sans / serif / mono). Body text uses the sans stack (Inter when the viewer
+// has it installed); "game moments" use <PixelText>, a bitmap font drawn in SVG, or the mono stack for long lines.
+const FONT_SANS = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 const FONT_GAME = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+// spacing scale: use these instead of ad-hoc numbers
+const SP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
+const TAP = 32; // minimum tap target (px)
 const UI: any = {
-  game: true, solid: true, scale: 1.15, radius: 14, radius2: 8,
-  body: FONT_GAME,
+  game: true, solid: true, scale: 1, radius: 10, radius2: 8,
+  body: FONT_SANS,
   pixel: FONT_GAME,
-  bg: "linear-gradient(180deg, #fafafa 0%, #ececec 100%)",
+  bg: "#f3f4f6",
+  trainer: "#3878c8", // acting BDR's trainer color: identity accent for nav, page kicker and the selected row
 };
+const trainerInk = () => (UI.game ? shade(UI.trainer, 0.22) : C.accent); // readable on white
 const fs = (n: number) => Math.round(n * UI.scale * 2) / 2;
-const FONT_CSS = `.bdr-root button:active { transform: translateY(1px); }
+const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialiased; }
+.bdr-root button:active { transform: translateY(1px); }
+.bdr-root button:focus-visible, .bdr-root a:focus-visible, .bdr-root [tabindex]:focus-visible { outline: 2px solid #3878c8; outline-offset: 2px; }
+.bdr-page { padding: 24px; }
+.bdr-split { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 880px); gap: 16px; align-items: start; }
+.bdr-split > .bdr-list { max-height: min(78vh, 820px); }
+.bdr-split > .bdr-detail { position: sticky; top: 8px; }
+.bdr-row { transition: background .12s; outline-offset: -2px; }
+.bdr-row:hover { background: var(--bdr-hover); }
+.bdr-row .bdr-row-links { opacity: 0; transition: opacity .12s; }
+.bdr-row:hover .bdr-row-links, .bdr-row:focus-within .bdr-row-links, .bdr-row[data-on="1"] .bdr-row-links { opacity: 1; }
+.bdr-cmd { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; margin: 16px 0 4px; }
+.bdr-cmd-btns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+@media (max-width: 560px) { .bdr-cmd { grid-template-columns: minmax(0, 1fr); } }
+.bdr-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 12px 16px; }
+.bdr-root details > summary { list-style: none; cursor: pointer; }
+.bdr-root details > summary::-webkit-details-marker { display: none; }
+.bdr-root details[open] > summary .bdr-chev { transform: rotate(90deg); }
+@media (hover: none) { .bdr-row .bdr-row-links { opacity: 1; } }
+@media (max-width: 900px) {
+  .bdr-page { padding: 16px; }
+  .bdr-split { grid-template-columns: minmax(0, 1fr); }
+  .bdr-split > .bdr-list { max-height: 440px; }
+  .bdr-split > .bdr-detail { position: static; }
+}
 .bdr-root select, .bdr-root input, .bdr-root textarea { outline-color: #3878c8; }
 .bdr-root ::selection { background: #3878c8; color: #fff; }
-@keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
+@keyframes bdrSpin{to{transform:rotate(360deg)}} @keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
 @keyframes bdrFloat { 0% { opacity: 0; transform: translate(-50%, 6px) } 15% { opacity: 1 } 100% { opacity: 0; transform: translate(-50%, -34px) } }
 @keyframes bdrStripe { from { background-position: 0 0 } to { background-position: 24px 0 } }
-@keyframes bdrPop { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }`;
+@keyframes bdrPop { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }
+@keyframes bdrHop { 0%, 100% { transform: translateY(0) } 40% { transform: translateY(-5px) } 60% { transform: translateY(-5px) } }
+.bdr-hop { animation: bdrHop 1.1s ease-in-out infinite; }
+@keyframes bdrHopOnce { 0% { transform: translateY(0) } 28% { transform: translateY(-12px) } 52% { transform: translateY(0) } 68% { transform: translateY(-4px) } 100% { transform: translateY(0) } }
+@keyframes bdrDash { 0% { transform: translateX(0) } 30% { transform: translateX(10px) } 60% { transform: translateX(-3px) } 100% { transform: translateX(0) } }
+@keyframes bdrWiggle { 0%, 100% { transform: rotate(0) } 25% { transform: rotate(-8deg) } 75% { transform: rotate(8deg) } }
+@keyframes bdrSpark { 0% { opacity: 0; transform: scale(.3) } 30% { opacity: 1; transform: scale(1) } 100% { opacity: 0; transform: scale(1.25) translateY(-12px) } }
+@keyframes bdrCarry { 0% { opacity: 0; transform: translate(-40%, 8px) } 20% { opacity: 1; transform: translate(-40%, -8px) } 80% { opacity: 1; transform: translate(60%, -14px) } 100% { opacity: 0; transform: translate(80%, -18px) } }
+@keyframes bdrRise { 0% { opacity: 0; transform: translate(-50%, 6px) } 15% { opacity: 1 } 100% { opacity: 0; transform: translate(-50%, -30px) } }
+@keyframes bdrLine { 0% { opacity: 0; transform: translateY(4px) } 12% { opacity: 1; transform: none } 82% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes bdrBanner { 0% { opacity: 0; transform: translate(-50%, -16px) scale(.96) } 12% { opacity: 1; transform: translate(-50%, 0) scale(1) } 88% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes bdrGlow { 0%, 100% { filter: drop-shadow(0 0 0 rgba(255,214,90,0)) } 50% { filter: drop-shadow(0 0 10px rgba(255,214,90,.95)) } }
+@media (prefers-reduced-motion: reduce) {
+  .bdr-hop { animation: none; } .bdr-fx, .bdr-fx * { animation: none !important; }
+  .bdr-root *, .bdr-root *::before, .bdr-root *::after { animation-iteration-count: 1 !important; animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}`;
+const reducedMotion = () => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
 // readable ink on a coloured badge
 const inkOn = (hex: string) => {
   const h = hex.replace("#", "");
@@ -85,6 +132,14 @@ const SIG: Record<string, { color: string; Icon: any }> = {
   "Content download": { color: "#c0eb75", Icon: BookOpen },
 };
 const sigMeta = (s: string) => SIG[s] ?? { color: C.muted, Icon: AlertTriangle };
+// darken a hex color (0..1) so pastel signal colors stay readable as text on white
+const shade = (hex: string, amt: number) => {
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return hex;
+  const c = [0, 2, 4].map((i) => Math.round(parseInt(h.slice(i, i + 2), 16) * (1 - amt)));
+  return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+};
+const sigInk = (s: string) => (UI.game ? shade(sigMeta(s).color, 0.38) : sigMeta(s).color);
 const chipKey = (s: string) => (s.startsWith("Converted") ? "Converted" : s === "No-show" ? "Outcome unresolved"
   : s.startsWith("Event") ? "Event" : ["Reactivation engaged", "Usage reactivated", "Re-signup"].includes(s) ? "Reactivation" : s);
 const CHIPS: [string, string][] = [
@@ -92,6 +147,20 @@ const CHIPS: [string, string][] = [
   ["Trial extension", "#ffd43b"], ["Converted", "#69db7c"], ["Onboarding booked", "#b197fc"], ["High AWR", "#38d9a9"],
   ["Business offer request", "#e03131"], ["Hand-raiser", "#ff4d94"], ["Event", "#4dabf7"], ["Reactivation", "#e599f7"], ["Content download", "#c0eb75"],
 ];
+
+const SORT_OPTS: [string, string][] = [
+  ["priority", "Priority"], ["signal_new", "Newest signal"], ["stale", "Longest since touch"], ["created_new", "Created: newest"],
+  ["created_old", "Created: oldest"], ["stl", "Slowest speed-to-lead"], ["touches", "Fewest touches (14d)"], ["awr", "AWR"],
+  ["cpu", "CPU 7d"], ["trial_end", "Trial ending soonest"], ["owner", "Queue owner"], ["company", "Company A–Z"],
+];
+const TOUCHED_OPTS: [string, string][] = [["any", "anyone"], ["me", "me (acting)"], ["owner", "queue owner"], ["other_bdr", "another BDR"], ["ae", "AE / non-BDR"], ["never", "never touched"]];
+const FRESH_OPTS: [string, string][] = [["any", "any"], ["never", "never touched"], ["gt3", "> 3d since touch"], ["gt7", "> 7d since touch"], ["le7", "touched ≤ 7d"]];
+const OPENED_OPTS: [string, string][] = [["any", "any"], ["since_touch", "since our last touch"], ["le1", "≤ 1d ago"], ["le3", "≤ 3d ago"], ["le7", "≤ 7d ago"], ["clicked", "clicked since last touch"], ["never", "never opened"]];
+const CREATED_OPTS: [string, string][] = [["any", "any time"], ["1", "≤ 1d"], ["3", "≤ 3d"], ["7", "≤ 7d"], ["30", "≤ 30d"], ["90", "≤ 90d"]];
+const PAGE_OPTS = ["Pricing", "Docs", "Product", "Blog", "Trial / ad landing", "Books / courses", "Events", "Contact / customers", "Homepage", "Careers"];
+const toOpts = (a: [string, string][]): DOpt[] => a.map(([v, label]) => ({ v, label }));
+const optLabel = (a: [string, string][], v: string) => a.find((x) => x[0] === v)?.[1] ?? v;
+const bdrOpt = (b: { id: string; name: string }): DOpt => ({ v: b.id, label: b.name, sprite: { map: lineFor(b.id, false)[0].map, pal: palOf(b.id, false, false) } });
 
 const BUCKETS: { id: string; label: string; hint: string }[] = [
   { id: "active", label: "Active", hint: "Live signal not yet answered by any touch" },
@@ -606,6 +675,31 @@ function LiTimeline({ li }: { li: LiInfo }) {
   );
 }
 
+// LinkedIn step buttons: spinner while the Flight saves, ✓ once logged. One-time steps lock after logging so they can't be double-counted.
+const LI_BTNS: [string, string, string][] = [["linkedin_request_sent", "Request sent", "LI sent"], ["linkedin_accepted", "Accepted", "LI accepted"], ["linkedin_message", "Messaged", "LI msg"], ["linkedin_reply", "They replied", "LI reply"]];
+const LI_ONCE = new Set(["linkedin_request_sent", "linkedin_accepted"]);
+function LiButtons({ li, cid, dis, pendingKeys, onAct, compact }: { li: LiInfo; cid: string; dis: boolean; pendingKeys?: Set<string>; onAct: (t: string) => void; compact?: boolean }) {
+  return (
+    <>
+      {LI_BTNS.map(([t, full, short]) => {
+        const k = LI_EVT_STAGE[t];
+        const saving = !!pendingKeys?.has(`${cid}:${t}`);
+        const done = !saving && !!li.firstAt[k];
+        const n = li.ev.filter((e) => e.t === t).length;
+        const off = dis || saving || (done && LI_ONCE.has(t));
+        const tip = saving ? "Saving to MotherDuck…" : done ? `Logged ${fmtDay(li.firstAt[k]!.ts)}${LI_ONCE.has(t) ? "" : n > 1 ? ` (${n}×). Click to log another` : ". Click to log another"}` : `Log: ${full}`;
+        return (
+          <button key={t} disabled={off} title={tip} onClick={() => onAct(t)}
+            style={{ ...btn(done ? "#2f9e44" : "#5fb3ff", off && !done && !saving), ...(compact ? { padding: "1px 7px", fontSize: fs(10.5) } : {}), opacity: saving ? 0.75 : 1, cursor: off ? "default" : "pointer" }}>
+            {saving ? <Loader2 size={compact ? 10 : 12} style={{ animation: "bdrSpin 0.9s linear infinite" }} /> : done ? <Check size={compact ? 10 : 12} /> : <Linkedin size={compact ? 10 : 12} />}
+            {" "}{compact ? short : full}{saving ? "…" : !LI_ONCE.has(t) && n > 1 ? ` ×${n}` : ""}
+          </button>
+        );
+      })}
+    </>
+  );
+}
+
 const LI_FILTER_OPTS: [string, string][] = [["any", "any"], ["none", "no activity yet"], ["some", "any activity"], ["requested", "requested, not accepted"],
   ["connected", "connected, not messaged"], ["messaged", "messaged, no reply"], ["replied", "replied"]];
 const liMatches = (f: string, li: LiInfo) => f === "any" || (f === "none" ? li.stage === 0 : f === "some" ? li.stage > 0
@@ -653,31 +747,33 @@ function derive(r: Row, ov: Ov | undefined): Row {
 
 // ---- small UI pieces ----
 const makeCtl = (): any => ({
-  background: C.surfaceAlt, color: C.text, border: `1px solid ${C.border}`, borderRadius: UI.radius2,
-  padding: UI.game ? "6px 10px" : "5px 8px", fontSize: fs(11.5), fontFamily: "inherit",
+  background: UI.game ? C.surface : C.surfaceAlt, color: C.text, border: `1px solid ${C.border}`, borderRadius: UI.radius2,
+  padding: UI.game ? "6px 12px" : "5px 8px", fontSize: fs(13), fontFamily: "inherit", minHeight: UI.game ? TAP : 28, boxSizing: "border-box", lineHeight: 1.3,
 });
 const ctl: any = makeCtl();
 const PANEL = (): any => (UI.game
-  ? { background: "#ffffff", border: "3px solid #484848", borderRadius: 8, boxShadow: "inset 0 0 0 2px #e2e2e2" }
-  : { ...PANEL() });
+  ? { background: C.surface, border: `1px solid ${C.border}`, borderRadius: UI.radius, boxShadow: "0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.04)" }
+  : { background: C.surface, border: `1px solid ${C.border}`, borderRadius: UI.radius });
+// framed "game" panel (dialogs, battle boxes): the chunky outline is reserved for game moments
+const GAME_PANEL = (): any => ({ background: "#ffffff", border: "3px solid #484848", borderRadius: 8, boxShadow: "inset 0 0 0 2px #e2e2e2" });
 const DIALOG = (): any => ({ background: "#ffffff", border: "3px solid #484848", boxShadow: "inset 0 0 0 2px #cfcfcf", borderRadius: 8,
-  padding: "12px 16px", fontFamily: UI.body, fontSize: fs(14), lineHeight: 1.6, color: "#303030", position: "relative" });
+  padding: `${SP.md}px ${SP.lg}px`, fontFamily: FONT_GAME, fontSize: fs(14), lineHeight: 1.6, color: "#303030", position: "relative" });
 function applyTheme(theme: string, size: string) {
   const unova = theme !== "terminal";
   Object.assign(C, unova ? THEME_UNOVA : THEME_TERMINAL);
   Object.assign(GB, unova ? GB_UNOVA : GB_CLASSIC);
   UI.game = unova; UI.solid = false;
-  UI.radius = unova ? 8 : 6; UI.radius2 = unova ? 6 : 4;
-  UI.scale = (unova ? 1.2 : 1) * (size === "s" ? 0.92 : size === "l" ? 1.14 : 1);
-  UI.body = unova ? FONT_GAME : "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-  UI.pixel = UI.body;
-  UI.bg = unova ? "linear-gradient(180deg, #fafafa 0%, #ececec 100%)" : C.page;
+  UI.radius = unova ? 10 : 6; UI.radius2 = unova ? 8 : 4;
+  UI.scale = size === "s" ? 0.92 : size === "l" ? 1.14 : 1;
+  UI.body = unova ? FONT_SANS : FONT_GAME;
+  UI.pixel = FONT_GAME;
+  UI.bg = unova ? C.page : C.page;
   Object.assign(ctl, makeCtl());
 }
 const btn = (color: string, disabled = false): any => (UI.game ? {
-  ...ctl, cursor: disabled ? "not-allowed" : "pointer", color: disabled ? C.faint : C.text, border: "2px solid #686868",
-  background: disabled ? "#f2f2f2" : "#ffffff", boxShadow: disabled ? "none" : `inset 0 -3px 0 ${color}`,
-  display: "inline-flex", alignItems: "center", gap: 5, opacity: disabled ? 0.6 : 1, fontWeight: 600,
+  ...ctl, cursor: disabled ? "not-allowed" : "pointer", color: disabled ? C.faint : C.text, border: `1px solid ${disabled ? C.border : "#9aa1ab"}`,
+  background: disabled ? C.surfaceAlt : C.surface, boxShadow: disabled ? "none" : `inset 0 -3px 0 ${color}`,
+  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: disabled ? 0.6 : 1, fontWeight: 600,
 } : {
   ...ctl, cursor: disabled ? "not-allowed" : "pointer", color: disabled ? C.faint : color,
   borderColor: disabled ? C.border : `${color}66`, background: disabled ? C.surfaceAlt : `${color}12`,
@@ -685,10 +781,144 @@ const btn = (color: string, disabled = false): any => (UI.game ? {
 });
 
 const miniLink = (c: string): any => ({
-  display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 22, height: 18, padding: "0 4px",
-  fontSize: fs(9), fontWeight: 700, borderRadius: 3, textDecoration: "none", cursor: "pointer",
-  border: UI.game ? "1px solid #888888" : `1px solid ${c}66`, color: UI.game ? "#484848" : c, background: UI.game ? "#ffffff" : `${c}14`,
+  display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: UI.game ? TAP : 22, height: UI.game ? TAP : 18, padding: "0 6px",
+  fontSize: fs(UI.game ? 11 : 9), fontWeight: 700, borderRadius: UI.game ? UI.radius2 : 3, textDecoration: "none", cursor: "pointer", boxSizing: "border-box",
+  border: UI.game ? `1px solid ${C.border}` : `1px solid ${c}66`, color: UI.game ? C.muted : c, background: UI.game ? C.surface : `${c}14`,
 });
+
+// ---- Pixel font: original 5x7 bitmap glyphs drawn as one SVG path (Dives can't load font files) ----
+// For short game moments only: page titles, creature names, level badges, XP pop-ups. Integer scaling keeps edges crisp.
+const PX_GLYPHS: Record<string, string> = {
+  "A": ".###.|#...#|#...#|#####|#...#|#...#|#...#",
+  "B": "####.|#...#|#...#|####.|#...#|#...#|####.",
+  "C": ".###.|#...#|#....|#....|#....|#...#|.###.",
+  "D": "####.|#...#|#...#|#...#|#...#|#...#|####.",
+  "E": "#####|#....|#....|####.|#....|#....|#####",
+  "F": "#####|#....|#....|####.|#....|#....|#....",
+  "G": ".###.|#...#|#....|#.###|#...#|#...#|.####",
+  "H": "#...#|#...#|#...#|#####|#...#|#...#|#...#",
+  "I": "###|.#.|.#.|.#.|.#.|.#.|###",
+  "J": "..###|...#.|...#.|...#.|#..#.|#..#.|.##..",
+  "K": "#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#",
+  "L": "#....|#....|#....|#....|#....|#....|#####",
+  "M": "#...#|##.##|#.#.#|#.#.#|#...#|#...#|#...#",
+  "N": "#...#|#...#|##..#|#.#.#|#..##|#...#|#...#",
+  "O": ".###.|#...#|#...#|#...#|#...#|#...#|.###.",
+  "P": "####.|#...#|#...#|####.|#....|#....|#....",
+  "Q": ".###.|#...#|#...#|#...#|#.#.#|#..#.|.##.#",
+  "R": "####.|#...#|#...#|####.|#.#..|#..#.|#...#",
+  "S": ".####|#....|#....|.###.|....#|....#|####.",
+  "T": "#####|..#..|..#..|..#..|..#..|..#..|..#..",
+  "U": "#...#|#...#|#...#|#...#|#...#|#...#|.###.",
+  "V": "#...#|#...#|#...#|#...#|#...#|.#.#.|..#..",
+  "W": "#...#|#...#|#...#|#.#.#|#.#.#|#.#.#|.#.#.",
+  "X": "#...#|#...#|.#.#.|..#..|.#.#.|#...#|#...#",
+  "Y": "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..",
+  "Z": "#####|....#|...#.|..#..|.#...|#....|#####",
+  "0": ".###.|#...#|#..##|#.#.#|##..#|#...#|.###.",
+  "1": "..#..|.##..|..#..|..#..|..#..|..#..|.###.",
+  "2": ".###.|#...#|....#|...#.|..#..|.#...|#####",
+  "3": "####.|....#|....#|.###.|....#|....#|####.",
+  "4": "...#.|..##.|.#.#.|#..#.|#####|...#.|...#.",
+  "5": "#####|#....|####.|....#|....#|#...#|.###.",
+  "6": "..##.|.#...|#....|####.|#...#|#...#|.###.",
+  "7": "#####|....#|...#.|..#..|.#...|.#...|.#...",
+  "8": ".###.|#...#|#...#|.###.|#...#|#...#|.###.",
+  "9": ".###.|#...#|#...#|.####|....#|...#.|.##..",
+  " ": "...|...|...|...|...|...|...",
+  ".": ".|.|.|.|.|.|#",
+  ",": "..|..|..|..|..|.#|#.",
+  ":": ".|.|#|.|.|#|.",
+  "!": "#|#|#|#|#|.|#",
+  "?": ".###.|#...#|....#|...#.|..#..|.....|..#..",
+  "-": "...|...|...|###|...|...|...",
+  "+": ".....|..#..|..#..|#####|..#..|..#..|.....",
+  "/": "....#|....#|...#.|..#..|.#...|#....|#....",
+  "'": "#|#|.|.|.|.|.",
+  "\u00d7": ".....|#...#|.#.#.|..#..|.#.#.|#...#|.....",
+  "#": ".#.#.|#####|.#.#.|.#.#.|.#.#.|#####|.#.#.",
+  "%": "##..#|##..#|...#.|..#..|.#...|#..##|#..##",
+  "(": ".#|#.|#.|#.|#.|#.|.#",
+  ")": "#.|.#|.#|.#|.#|.#|#.",
+  "\u2192": ".....|..#..|...#.|#####|...#.|..#..|.....",
+  "\u2726": "..#..|..#..|.###.|#####|.###.|..#..|..#..",
+  "\u25b2": ".....|..#..|.###.|#####|.....|.....|.....",
+  "\u25b6": "#....|##...|###..|####.|###..|##...|#....",
+  "\u2665": ".....|.#.#.|#####|#####|.###.|..#..|....."
+};
+const pxCache = new Map<string, { d: string; w: number }>();
+function pixelPath(text: string) {
+  const hit = pxCache.get(text);
+  if (hit) return hit;
+  let x = 0, d = "";
+  for (const ch of text.toUpperCase()) {
+    const rows = (PX_GLYPHS[ch] ?? PX_GLYPHS[" "]).split("|");
+    rows.forEach((row, y) => {
+      for (let i = 0; i < row.length; ) {
+        if (row[i] !== "#") { i++; continue; }
+        let n = 1; while (row[i + n] === "#") n++;
+        d += `M${x + i} ${y}h${n}v1h-${n}z`;
+        i += n;
+      }
+    });
+    x += rows[0].length + 1;
+  }
+  const out = { d, w: Math.max(1, x - 1) };
+  if (pxCache.size > 400) pxCache.clear();
+  pxCache.set(text, out);
+  return out;
+}
+// px = target cap height; rounds to whole screen pixels per font pixel (min 1)
+function PixelText({ text, px = 14, color = "currentColor", shadow, title }: { text: string; px?: number; color?: string; shadow?: string; title?: string }) {
+  const k = Math.max(1, Math.round(px / 7));
+  const { d, w } = pixelPath(text);
+  return (
+    <svg role="img" aria-label={title ?? text} width={(w + (shadow ? 1 : 0)) * k} height={(7 + (shadow ? 1 : 0)) * k} viewBox={`0 0 ${w + (shadow ? 1 : 0)} ${7 + (shadow ? 1 : 0)}`}
+      shapeRendering="crispEdges" style={{ display: "inline-block", verticalAlign: "middle", overflow: "visible", flexShrink: 0 }}>
+      <title>{title ?? text}</title>
+      {shadow && <path d={d} fill={shadow} transform="translate(1 1)" />}
+      <path d={d} fill={color} />
+    </svg>
+  );
+}
+
+// Empty state: the acting BDR's creature with a short game line
+function EmptyMon({ bdr, ob, title, children }: { bdr: string; ob: boolean; title: string; children?: any }) {
+  const sp = lineFor(bdr, ob)[0];
+  return (
+    <div style={{ padding: `${SP.xxl}px ${SP.xl}px`, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: SP.md }}>
+      <div style={{ ...STAGE(false), padding: "4px 16px 18px", lineHeight: 0 }}><Sprite map={sp.map} pal={palOf(bdr, ob, false)} h={64} fit="box" /></div>
+      {UI.game ? <PixelText text={title} px={fs(14)} color={C.text} /> : <b style={{ fontSize: fs(13) }}>{title}</b>}
+      {children && <div style={{ fontSize: fs(13), color: C.muted, maxWidth: 300, lineHeight: 1.5 }}>{children}</div>}
+    </div>
+  );
+}
+// Loading state: a creature silhouette hops while rows load (it's clearly not real data yet)
+function LoadingMon({ bdr, ob, label, rows = 6, rowH = 64 }: { bdr: string; ob: boolean; label: string; rows?: number; rowH?: number }) {
+  const sp = lineFor(bdr, ob)[0];
+  return (
+    <div style={{ padding: SP.lg }} aria-busy="true">
+      <div style={{ display: "flex", alignItems: "center", gap: SP.md, marginBottom: SP.lg }}>
+        <span className="bdr-hop" style={{ filter: "brightness(0)", opacity: 0.22, lineHeight: 0, display: "inline-block" }}><Sprite map={sp.map} pal={palOf(bdr, ob, false)} h={40} /></span>
+        <span style={{ fontSize: fs(13), color: C.faint }}>{label}<span style={{ animation: "bdrBlink 1s steps(1) infinite" }}>…</span></span>
+      </div>
+      {Array.from({ length: rows }).map((_, i) => <div key={i} className="animate-pulse" style={{ height: rowH, background: C.surfaceAlt, borderRadius: UI.radius2, marginBottom: SP.sm, opacity: 1 - i * 0.12 }} />)}
+    </div>
+  );
+}
+
+// Page title: pixel type in the game theme, plain bold mono in Terminal
+function PageTitle({ text }: { text: string }) {
+  return (
+    <h1 style={{ margin: UI.game ? `${SP.sm}px 0 ${SP.sm}px` : "2px 0 0", lineHeight: 1, fontSize: UI.game ? undefined : 21, fontWeight: 800 }}>
+      {UI.game ? <PixelText text={text} px={fs(24)} color={C.text} shadow="#cfd4db" /> : text}
+    </h1>
+  );
+}
+// Level badge, e.g. "Lv 28", in pixel type
+function LvBadge({ lv, px = 11, color = "#303030" }: { lv: number | string; px?: number; color?: string }) {
+  return UI.game ? <PixelText text={`LV${lv}`} px={fs(px)} color={color} title={`Level ${lv}`} /> : <span style={{ fontSize: fs(px + 1) }}>:L{lv}</span>;
+}
 
 function DialogBox({ children }: any) {
   if (!UI.game) return null;
@@ -700,18 +930,21 @@ function DialogBox({ children }: any) {
   );
 }
 
-function CommandMenu({ prompt, items }: { prompt: any; items: { label: string; c1: string; c2: string; onClick?: () => void; href?: string; disabled?: boolean; title?: string }[] }) {
+function CommandMenu({ prompt, items, mon }: { prompt: any; items: { label: string; c1: string; c2: string; onClick?: () => void; href?: string; disabled?: boolean; title?: string }[]; mon?: any }) {
   if (!UI.game) return null;
   const cmd = (it: any): any => ({
     fontFamily: UI.body, fontSize: fs(14), fontWeight: 700, letterSpacing: 1, color: "#ffffff", textShadow: "1px 1px 0 rgba(0,0,0,.35)",
     background: it.disabled ? "linear-gradient(180deg, #c8c8c8 0%, #a8a8a8 100%)" : `linear-gradient(180deg, ${it.c1} 0%, ${it.c2} 100%)`,
-    border: "3px solid #383838", borderRadius: 999, padding: "8px 10px", cursor: it.disabled ? "not-allowed" : "pointer",
+    border: "3px solid #383838", borderRadius: 999, padding: "8px 10px", minHeight: 44, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: it.disabled ? "not-allowed" : "pointer",
     boxShadow: "inset 0 2px 0 rgba(255,255,255,.45)", textAlign: "center", textDecoration: "none", display: "block",
   });
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr)", gap: 10, margin: "14px 0 4px" }}>
-      <div style={{ ...DIALOG(), display: "flex", alignItems: "center" }}>{prompt}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+    <div className="bdr-cmd">
+      <div style={{ ...DIALOG(), display: "flex", alignItems: "center", gap: SP.md }}>
+        {mon && <div style={{ flexShrink: 0, lineHeight: 0 }}>{mon}</div>}
+        <div style={{ minWidth: 0 }}>{prompt}</div>
+      </div>
+      <div className="bdr-cmd-btns">
         {items.map((it) => it.href
           ? <a key={it.label} href={it.href} target="_blank" rel="noopener noreferrer" title={it.title} style={cmd(it)}>{it.label}</a>
           : <button key={it.label} disabled={it.disabled} title={it.title} onClick={it.onClick} style={cmd(it)}>{it.label}</button>)}
@@ -720,42 +953,33 @@ function CommandMenu({ prompt, items }: { prompt: any; items: { label: string; c
   );
 }
 
-function Chip({ label, color, count, active, onClick }: any) {
-  return (
-    <button onClick={onClick} style={{
-      display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 9px", borderRadius: 999, fontSize: fs(11),
-      fontFamily: "inherit", cursor: "pointer", border: UI.game ? `2px solid ${active ? "#3878c8" : "#b8b8b8"}` : `1px solid ${active ? color : C.border}`,
-      background: UI.game ? (active ? "#dce8f8" : "#ffffff") : active ? `${color}22` : C.surface, color: UI.game ? C.text : active ? color : C.muted,
-    }}>
-      <span style={{ width: 7, height: 7, borderRadius: 999, background: color }} />
-      {label} <b style={{ color: C.text }}>{count}</b>
-    </button>
-  );
-}
-
-function SignalTag({ s, dim }: { s: Sig | string; dim?: boolean }) {
+// Signal type tag: the signal's color as a tint + icon, readable ink. big = the contact's top signal.
+function SignalTag({ s, dim, big }: { s: Sig | string; dim?: boolean; big?: boolean }) {
   const name = typeof s === "string" ? s : s.sig;
   const handled = typeof s !== "string" && s.handled;
   const m = sigMeta(name);
   const I = m.Icon;
+  const g = UI.game;
   return (
     <span title={handled ? "Touched since this signal" : "Unanswered"} style={{
-      display: "inline-flex", alignItems: "center", gap: 4, fontSize: fs(10.5), padding: UI.solid ? "2px 9px" : "1px 7px", borderRadius: UI.solid ? 999 : 3,
-      border: `1px solid ${UI.game ? "#9a9a9a" : m.color + "55"}`, color: UI.game ? C.text : m.color, background: UI.game ? "#ffffff" : `${m.color}14`,
-      fontWeight: UI.solid ? 700 : 400, whiteSpace: "nowrap",
-      opacity: handled || dim ? 0.45 : 1, textDecoration: handled ? "line-through" : "none",
+      display: "inline-flex", alignItems: "center", gap: big ? 6 : 4, fontSize: fs(g ? (big ? 13 : 11.5) : 10.5),
+      padding: g ? (big ? "4px 12px" : "2px 8px") : "1px 7px", borderRadius: g ? 999 : 3,
+      border: `1px solid ${g ? m.color + "aa" : m.color + "55"}`, color: g ? shade(m.color, 0.45) : m.color,
+      background: g ? `${m.color}${big ? "33" : "22"}` : `${m.color}14`,
+      fontWeight: g ? (big ? 800 : 600) : 400, whiteSpace: "nowrap", lineHeight: 1.4,
+      opacity: handled || dim ? 0.5 : 1, textDecoration: handled ? "line-through" : "none",
     }}>
-      <I size={11} color={m.color} /> {name}
+      <I size={big ? 14 : 12} color={g ? shade(m.color, 0.2) : m.color} /> {name}
     </span>
   );
 }
 
 function Stat({ label, value, tone, sub }: { label: string; value: string; tone?: string; sub?: string }) {
   return (
-    <div>
-      <div style={{ fontSize: fs(9.5), letterSpacing: 0.8, textTransform: "uppercase", color: C.faint }}>{label}</div>
-      <div style={{ fontSize: fs(13.5), fontWeight: 700, color: tone ?? C.text, fontVariantNumeric: "tabular-nums" }}>{value || "—"}</div>
-      {sub && <div style={{ fontSize: fs(10), color: C.faint }}>{sub}</div>}
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: fs(UI.game ? 11 : 9.5), letterSpacing: 0.6, textTransform: "uppercase", color: C.faint }}>{label}</div>
+      <div style={{ fontSize: fs(UI.game ? 15 : 13.5), fontWeight: 700, color: tone ?? C.text, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{value || "—"}</div>
+      {sub && <div style={{ fontSize: fs(UI.game ? 12 : 10), color: C.faint, marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -772,68 +996,33 @@ function Milestone({ done, label }: { done: boolean; label: string }) {
   );
 }
 
-function Section({ title, children }: any) {
+const SECTION_TITLE = (): any => (UI.game
+  ? { fontSize: fs(11.5), letterSpacing: 0.8, color: C.muted, fontWeight: 700, textTransform: "uppercase" }
+  : { fontSize: fs(10), letterSpacing: 1, color: C.accent });
+function Section({ title, children, right }: any) {
   return (
-    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 10 }}>
-      <div style={UI.game ? { fontSize: fs(11), letterSpacing: 1, color: C.muted, marginBottom: 10, fontWeight: 700, textTransform: "uppercase" } : { fontSize: fs(10), letterSpacing: 1, color: C.accent, marginBottom: 8 }}>{UI.game ? "" : "// "}{title}</div>
+    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: UI.game ? SP.xl : 12, paddingTop: UI.game ? SP.lg : 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: SP.sm, marginBottom: UI.game ? SP.md : 8 }}>
+        <div style={SECTION_TITLE()}>{UI.game ? "" : "// "}{title}</div>{right}
+      </div>
       {children}
     </div>
   );
 }
-
-function BdrMultiSelect({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
-  const [open, setOpen] = useState(false);
-  const all = selected.length === BDRS.length;
-  const label = all ? "All BDRs" : selected.length === 1 ? bdrName(selected[0]) : `${selected.length} BDRs`;
-  const toggle = (id: string) => {
-    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
-    onChange(next.length ? next : [id]);
-  };
+// Collapsible "More details" section. Remembers open/closed per section while you move between contacts.
+const expanderMemory: Record<string, boolean> = {};
+function Expander({ id, title, summary, defaultOpen = false, children }: { id: string; title: string; summary?: any; defaultOpen?: boolean; children: any }) {
+  const [open, setOpen] = useState<boolean>(expanderMemory[id] ?? defaultOpen);
+  const toggle = () => { expanderMemory[id] = !open; setOpen(!open); };
   return (
-    <div style={{ position: "relative" }}>
-      <button onClick={() => setOpen(!open)} style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-        Queues: <b>{label}</b> <ChevronDown size={12} />
+    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: UI.game ? SP.xl : 12 }}>
+      <button type="button" aria-expanded={open} onClick={toggle} style={{ display: "flex", alignItems: "center", gap: SP.sm, width: "100%", minHeight: TAP + 8,
+        padding: `${SP.sm}px 0`, background: "transparent", border: "none", cursor: "pointer", color: C.text, fontFamily: "inherit", textAlign: "left" }}>
+        <ChevronDown size={14} color={C.muted} style={{ transform: open ? "none" : "rotate(-90deg)", transition: "transform .15s", flexShrink: 0 }} />
+        <span style={SECTION_TITLE()}>{UI.game ? "" : "// "}{title}</span>
+        {!open && summary ? <span style={{ fontSize: fs(12), color: C.faint, marginLeft: "auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{summary}</span> : null}
       </button>
-      {open && (
-        <div style={{ position: "absolute", top: "110%", right: 0, zIndex: 20, background: C.surface, border: `1px solid ${C.border}`,
-          borderRadius: UI.radius, padding: 8, minWidth: 210, boxShadow: "0 6px 20px rgba(0,0,0,.5)" }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <button style={{ ...ctl, cursor: "pointer", flex: 1 }} onClick={() => onChange(BDRS.map((b) => b.id))}>All BDRs</button>
-            <button style={{ ...ctl, cursor: "pointer" }} onClick={() => setOpen(false)}><X size={12} /></button>
-          </div>
-          {BDRS.map((b) => (
-            <label key={b.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: fs(12), padding: "4px 2px", cursor: "pointer", color: C.text }}>
-              <input type="checkbox" checked={selected.includes(b.id)} onChange={() => toggle(b.id)} />
-              {b.name}
-              <span onClick={(e) => { e.preventDefault(); onChange([b.id]); }} style={{ marginLeft: "auto", fontSize: fs(10), color: C.accent, cursor: "pointer" }}>only</span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MultiPick({ label, options, selected, onChange }: { label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div style={{ position: "relative" }}>
-      <button onClick={() => setOpen(!open)} style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: selected.length ? C.accent : C.text }}>
-        {label}: <b>{selected.length ? selected.join(", ") : "any"}</b> <ChevronDown size={12} />
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "110%", left: 0, zIndex: 20, ...PANEL(), padding: 8, minWidth: 200, boxShadow: "0 6px 20px rgba(0,0,0,.5)" }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <button style={{ ...ctl, cursor: "pointer", flex: 1 }} onClick={() => onChange([])}>any</button>
-            <button style={{ ...ctl, cursor: "pointer" }} onClick={() => setOpen(false)}><X size={12} /></button>
-          </div>
-          {options.map((o) => (
-            <label key={o} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: fs(12), padding: "3px 2px", cursor: "pointer", color: C.text }}>
-              <input type="checkbox" checked={selected.includes(o)} onChange={() => onChange(selected.includes(o) ? selected.filter((x) => x !== o) : [...selected, o])} /> {o}
-            </label>
-          ))}
-        </div>
-      )}
+      {open && <div style={{ paddingBottom: SP.sm }}>{children}</div>}
     </div>
   );
 }
@@ -849,8 +1038,159 @@ function Select({ value, onChange, options, label }: { value: string; onChange: 
   );
 }
 
+// ---- Filter controls: one dropdown component for every filter (single or multi-select) ----
+// Counts are computed lazily (only while the menu is open) from the rows that match every *other* active filter.
+type DOpt = { v: string; label: string; color?: string; hint?: string; sprite?: { map: string[]; pal: any } };
+let ddSeq = 0;
+function useDismiss(ref: any, open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+}
+const ddButton = (active: boolean): any => ({
+  ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", maxWidth: "100%",
+  ...(active ? { borderColor: C.accent, background: C.accentDim, color: UI.game ? "#1d4f8f" : C.accent } : {}),
+});
+const DDBlock = createContext(false); // inside "All filters": dropdowns fill their grid cell
+function Dropdown({ label, options, value, onChange, multi, values, onChangeMulti, counts, isDefault, align = "left", onOnly, display, menuWidth = 260, hideLabel }: {
+  label: string; options: DOpt[]; value?: string; onChange?: (v: string) => void;
+  multi?: boolean; values?: string[]; onChangeMulti?: (v: string[]) => void;
+  counts?: () => Record<string, number>; isDefault?: boolean; align?: "left" | "right"; onOnly?: (v: string) => void; display?: string; menuWidth?: number; hideLabel?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const wrap = useRef<HTMLDivElement | null>(null);
+  const list = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const id = useMemo(() => `dd${++ddSeq}`, []);
+  useDismiss(wrap, open, () => setOpen(false));
+  const sel = multi ? (values ?? []) : [value ?? ""];
+  const n = open && counts ? counts() : null;
+  const cur = options.find((o) => o.v === value);
+  const shown = display ?? (multi ? (sel.length === 0 ? "any" : sel.length === 1 ? (options.find((o) => o.v === sel[0])?.label ?? sel[0]) : `${sel.length} selected`) : (cur?.label ?? value ?? ""));
+  const active = isDefault === undefined ? (multi ? sel.length > 0 : false) : !isDefault;
+  const openMenu = () => { setHi(Math.max(0, options.findIndex((o) => sel.includes(o.v)))); setOpen(true); setTimeout(() => list.current?.focus(), 0); };
+  const pick = (o: DOpt) => {
+    if (multi) onChangeMulti?.(sel.includes(o.v) ? sel.filter((x) => x !== o.v) : [...sel, o.v]);
+    else { onChange?.(o.v); setOpen(false); btnRef.current?.focus(); }
+  };
+  const onKey = (e: any) => {
+    e.stopPropagation(); // keep the feed's j/k/r shortcuts out of open menus
+    if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(options.length - 1, h + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
+    else if (e.key === "Home") { e.preventDefault(); setHi(0); }
+    else if (e.key === "End") { e.preventDefault(); setHi(options.length - 1); }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const o = options[hi]; if (o) pick(o); }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); btnRef.current?.focus(); }
+    else if (e.key === "Tab") setOpen(false);
+  };
+  useEffect(() => { if (open) document.getElementById(`${id}-o${hi}`)?.scrollIntoView({ block: "nearest" }); }, [hi, open]);
+  const block = useContext(DDBlock);
+  return (
+    <div ref={wrap} data-bdr-menu="1" style={{ position: "relative", maxWidth: "100%", ...(block ? { width: "100%" } : {}) }}>
+      <button ref={btnRef} type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={(e) => { if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); e.stopPropagation(); openMenu(); } }}
+        style={{ ...ddButton(active), ...(block ? { width: "100%", justifyContent: "space-between" } : {}) }}>
+        {!hideLabel && <span style={{ color: active ? "inherit" : C.faint, fontWeight: 500, ...(block ? { marginRight: "auto" } : {}) }}>{label}</span>}
+        <b style={{ fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{shown}</b>
+        <ChevronDown size={14} style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform .12s" }} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", [align]: 0, zIndex: 40, width: menuWidth, maxWidth: "calc(100vw - 32px)", background: C.surface,
+          border: `1px solid ${C.border}`, borderRadius: UI.radius, boxShadow: "0 10px 30px rgba(16,24,40,.16)", overflow: "hidden" }}>
+          {multi && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: `${SP.sm}px ${SP.md}px`, borderBottom: `1px solid ${C.border}`, fontSize: fs(12), color: C.faint }}>
+              <span>{label}{sel.length ? ` · ${sel.length} selected` : ""}</span>
+              <button type="button" onClick={() => onChangeMulti?.([])} disabled={!sel.length} style={{ border: "none", background: "transparent", color: sel.length ? C.accent : C.faint, cursor: sel.length ? "pointer" : "default", fontSize: fs(12), fontWeight: 600, minHeight: 28 }}>Clear</button>
+            </div>
+          )}
+          <div ref={list} role="listbox" aria-label={label} aria-multiselectable={multi || undefined} tabIndex={-1} aria-activedescendant={`${id}-o${hi}`} onKeyDown={onKey}
+            style={{ maxHeight: 340, overflowY: "auto", padding: SP.xs, outline: "none" }}>
+            {options.map((o, i) => {
+              const on = sel.includes(o.v);
+              const c = n ? n[o.v] : undefined;
+              return (
+                <div key={o.v} id={`${id}-o${i}`} role="option" aria-selected={on} title={o.hint} onMouseEnter={() => setHi(i)} onClick={() => pick(o)}
+                  style={{ display: "flex", alignItems: "center", gap: SP.sm, minHeight: TAP, padding: `0 ${SP.sm}px`, borderRadius: UI.radius2, cursor: "pointer",
+                    background: i === hi ? C.accentDim : "transparent", fontSize: fs(13), color: c === 0 && !on ? C.faint : C.text }}>
+                  {multi
+                    ? <span style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${on ? C.accent : C.border}`, background: on ? C.accent : C.surface, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{on && <Check size={12} color="#fff" />}</span>
+                    : <span style={{ width: 16, display: "inline-flex", justifyContent: "center", flexShrink: 0 }}>{on && <Check size={14} color={C.accent} />}</span>}
+                  {o.sprite && <span style={{ width: 24, height: 24, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Sprite map={o.sprite.map} pal={o.sprite.pal} h={24} /></span>}
+                  {o.color && <span style={{ width: 9, height: 9, borderRadius: 999, background: o.color, flexShrink: 0 }} />}
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: on ? 650 : 400 }}>{o.label}</span>
+                  {onOnly && <button type="button" onClick={(e) => { e.stopPropagation(); onOnly(o.v); setOpen(false); }} style={{ border: "none", background: "transparent", color: C.accent, fontSize: fs(11.5), cursor: "pointer", padding: "0 4px" }}>only</button>}
+                  {c !== undefined && <span style={{ fontSize: fs(12), color: C.faint, fontVariantNumeric: "tabular-nums" }}>{c}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "All filters" popover: the less-used filters, each one a Dropdown
+function FilterPopover({ n, children }: { n: number; children: any }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement | null>(null);
+  useDismiss(wrap, open, () => setOpen(false));
+  return (
+    <div ref={wrap} data-bdr-menu="1" style={{ position: "relative" }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} style={ddButton(n > 0)}>
+        <SlidersHorizontal size={14} /> All filters{n ? ` (${n})` : ""}
+      </button>
+      {open && (
+        <div role="dialog" aria-label="All filters" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 35, width: 560, maxWidth: "calc(100vw - 32px)",
+          background: C.surface, border: `1px solid ${C.border}`, borderRadius: UI.radius, boxShadow: "0 10px 30px rgba(16,24,40,.16)", padding: SP.lg }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: SP.md }}>
+            <b style={{ fontSize: fs(14) }}>All filters</b>
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close" style={{ ...ctl, minHeight: 28, padding: "2px 8px", cursor: "pointer" }}><X size={14} /></button>
+          </div>
+          <DDBlock.Provider value={true}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: SP.sm }}>{children}</div>
+          </DDBlock.Provider>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Active filters as removable pills, plus Clear all
+function FilterPills({ pills, onClear }: { pills: { k: string; label: string; color?: string; onRemove: () => void }[]; onClear: () => void }) {
+  if (!pills.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center", marginTop: SP.md }}>
+      {pills.map((p) => (
+        <span key={p.k} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "0 4px 0 10px", minHeight: 30, borderRadius: 999, fontSize: fs(12.5),
+          background: p.color ? `${p.color}22` : C.accentDim, border: `1px solid ${p.color ? p.color + "99" : C.accent + "55"}`, color: p.color ? shade(p.color, 0.45) : C.text, fontWeight: 600 }}>
+          {p.color && <span style={{ width: 8, height: 8, borderRadius: 999, background: p.color }} />}
+          {p.label}
+          <button type="button" onClick={p.onRemove} aria-label={`Remove filter ${p.label}`} style={{ border: "none", background: "transparent", cursor: "pointer", color: "inherit", width: 24, height: 24, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><X size={13} /></button>
+        </span>
+      ))}
+      <button type="button" onClick={onClear} style={{ border: "none", background: "transparent", color: C.accent, cursor: "pointer", fontSize: fs(12.5), fontWeight: 600, minHeight: TAP, padding: "0 4px" }}>Clear all</button>
+    </div>
+  );
+}
+// Search box that matches the filter controls
+function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <label style={{ ...ctl, display: "flex", alignItems: "center", gap: SP.sm, flex: "1 1 220px", minWidth: 0, maxWidth: 360, cursor: "text" }}>
+      <Search size={14} color={C.faint} />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label="Search"
+        style={{ background: "transparent", color: C.text, border: "none", outline: "none", fontSize: fs(13), fontFamily: "inherit", flex: 1, minWidth: 0 }} />
+      {value && <button type="button" onClick={() => onChange("")} aria-label="Clear search" style={{ border: "none", background: "transparent", cursor: "pointer", color: C.faint, display: "inline-flex" }}><X size={14} /></button>}
+    </label>
+  );
+}
+
 // ---- Contact card with actions ----
-function Card({ r, acting, busy, onAct, runMsg }: { r: Row; acting: string; busy: boolean; onAct: (t: string, extra?: any) => void; runMsg: string }) {
+function Card({ r, acting, busy, onAct, runMsg, pendingKeys, stuck, onRetry }: { r: Row; acting: string; busy: boolean; onAct: (t: string, extra?: any) => void; runMsg: string; pendingKeys?: Set<string>; stuck?: boolean; onRetry?: () => void }) {
   const [note, setNote] = useState("");
   const [days, setDays] = useState("5");
   const canEdit = r.queue_owner_id === acting;
@@ -863,77 +1203,90 @@ function Card({ r, acting, busy, onAct, runMsg }: { r: Row; acting: string; busy
   const overTop = r.last_by_id && r.last_by_id !== r.queue_owner_id;
   const dis = !canEdit || busy;
 
+  const sigsSorted = [...r.signals].sort((x, y) => Number(!!x.handled) - Number(!!y.handled) || x.rnk - y.rnk);
+  const top = sigsSorted[0];
+  const bucketLabel = BUCKETS.find((b) => b.id === r.bucket)?.label;
+  const engagedSinceTouch = !!(r.last_opened && (!r.last_touch || r.last_opened > r.last_touch));
+  const engageSummary = [r.last_opened ? `opened ${fmtAgo(r.last_opened)}` : "no opens", `${r.page_views} page views`, r.pricing_visits ? `${r.pricing_visits} pricing` : ""].filter(Boolean).join(" · ");
+  const usageSummary = [r.plan ? r.plan.replace("_", " ") : "no plan", r.org_name ? `${r.cpu_7d.toFixed(1)} CPU-h 7d` : "no org linked", r.awr > 0 ? `AWR ${fmtUsd(r.awr)}` : ""].filter(Boolean).join(" · ");
+  const pad = UI.game ? SP.xl : 14;
+  const tx = (n: number, t: number) => fs(UI.game ? n : t); // game theme reads a size up; Terminal keeps its compact sizes
+
   return (
-    <div style={{ ...PANEL(), padding: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: fs(16.5), fontWeight: 700 }}>{r.contact_name || r.email || "Unknown contact"}</div>
-          <div style={{ fontSize: fs(12), color: C.muted, marginTop: 2 }}>{[r.jobtitle, r.company].filter(Boolean).join(" @ ") || "—"}</div>
-          <div style={{ fontSize: fs(11), color: C.faint, marginTop: 2 }}>
-            {r.email} · BDR owner: <b style={{ color: C.text }}>{bdrName(r.queue_owner_id)}</b>
+    <div style={{ ...PANEL(), padding: pad }}>
+      {/* identity: name > top signal > status > metadata */}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: SP.lg, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+          <div style={{ fontSize: tx(21, 16.5), fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{r.contact_name || r.email || "Unknown contact"}</div>
+          <div style={{ fontSize: tx(14, 12), color: C.muted, marginTop: SP.xs }}>{[r.jobtitle, r.company].filter(Boolean).join(" @ ") || "—"}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, marginTop: SP.md, alignItems: "center" }}>
+            {sigsSorted.map((s) => <SignalTag key={s.sig} s={s} big={s === top} />)}
+            {r.post_sqa && <span style={{ fontSize: tx(12, 10.5), color: C.faint, border: `1px dashed ${C.border}`, padding: "2px 8px", borderRadius: 999 }}>Post-SQA: {r.sqa_info || "qualified deal"}</span>}
+          </div>
+          <div style={{ fontSize: tx(13, 11), color: C.text, marginTop: SP.md, display: "flex", flexWrap: "wrap", gap: `${SP.xs}px ${SP.md}px`, alignItems: "center" }}>
+            {bucketLabel && <span style={{ fontWeight: 700, color: r.bucket === "active" || r.bucket === "retouch_due" ? C.danger : C.muted }}>{bucketLabel}</span>}
+            <span>Last touch <b style={{ color: dsl == null || dsl > 7 ? C.danger : C.text }}>{fmtAgo(r.last_touch)}</b>{r.last_by ? ` by ${r.last_by}` : ""}</span>
+            {r.last_reply && (!r.last_touch || r.last_reply > r.last_touch) && <span style={{ color: "#2f7fd6", fontWeight: 700 }}>Replied {fmtAgo(r.last_reply)}, awaiting us</span>}
+            {r.ov?.retouch_on && <span style={{ color: C.warn }}>↻ retouch {r.ov.retouch_on}</span>}
+          </div>
+          <div style={{ fontSize: tx(12, 11), color: C.faint, marginTop: SP.xs, overflowWrap: "anywhere" }}>
+            {r.email} · BDR owner <b style={{ color: C.muted }}>{bdrName(r.queue_owner_id)}</b>
             {r.owner_id && r.owner_id !== r.queue_owner_id ? ` · contact owner ${r.contact_owner || bdrName(r.owner_id)}` : ""}
             {r.ae_name ? ` · AE ${r.ae_name}` : ""}
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-end", flexShrink: 0 }}>
-          <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}>HubSpot <ExternalLink size={11} /></a>
+        <div style={{ display: "flex", flexDirection: "column", gap: SP.sm, alignItems: "stretch", flexShrink: 0 }}>
+          <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}>HubSpot <ExternalLink size={12} /></a>
           {r.linkedin_url
-            ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" style={{ ...btn("#5fb3ff"), textDecoration: "none" }}><Linkedin size={11} /> LinkedIn</a>
-            : <span style={{ fontSize: fs(10.5), color: C.faint }}>No LinkedIn on file</span>}
-          {r.primary_org_id && <a href={C360(r.primary_org_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn(C.accent), textDecoration: "none" }}>Customer 360 <ExternalLink size={11} /></a>}
+            ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" style={{ ...btn("#5fb3ff"), textDecoration: "none" }}><Linkedin size={12} /> LinkedIn</a>
+            : <span style={{ fontSize: tx(12, 10.5), color: C.faint, textAlign: "center" }}>No LinkedIn on file</span>}
+          {r.primary_org_id && <a href={C360(r.primary_org_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn(C.accent), textDecoration: "none" }}>Customer 360 <ExternalLink size={12} /></a>}
         </div>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-        {r.signals.map((s) => <SignalTag key={s.sig} s={s} />)}
-        {r.post_sqa && <span style={{ fontSize: fs(10.5), color: C.faint, border: `1px dashed ${C.border}`, padding: "1px 7px", borderRadius: 3 }}>Post-SQA: {r.sqa_info || "qualified deal"}</span>}
-      </div>
-      <div style={{ fontSize: fs(11), color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
-        {r.signals.map((s) => (
-          <div key={s.sig}>
-            <span style={{ color: sigMeta(s.sig).color }}>{s.sig}</span>
+      {/* why they're in the queue */}
+      <div style={{ fontSize: tx(13, 11), color: C.muted, marginTop: SP.md, lineHeight: 1.6 }}>
+        {sigsSorted.map((s) => (
+          <div key={s.sig} style={{ opacity: s.handled ? 0.6 : 1 }}>
+            <span style={{ color: sigInk(s.sig), fontWeight: 600 }}>{s.sig}</span>
             {s.ts ? ` · ${fmtAgo(s.ts)}` : ""}{s.detail ? ` · ${s.detail}` : ""}{s.handled ? " · ✓ touched since" : ""}
           </div>
         ))}
       </div>
 
-      <CommandMenu prompt={<span>What will you do with <b>{(r.contact_name || r.email || "this lead").split(" ")[0]}</b>?</span>} items={[
+      <CommandMenu mon={<MonReactor bdr={acting} ob={false} h={56} />}
+        prompt={<FxPrompt bdr={acting} ob={false}><span>What will you do with <b>{(r.contact_name || r.email || "this lead").split(" ")[0]}</b>?</span></FxPrompt>} items={[
         { label: "DRAFT", c1: "#f08080", c2: "#d04848", title: "Write the next email", onClick: () => document.getElementById(`draft-${r.contact_id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }) },
         { label: "RETOUCH", c1: "#f0b050", c2: "#d08820", disabled: dis, title: "Retouch in 3 days", onClick: () => onAct("retouch_set", { days: 3 }) },
         { label: "REVIEWED", c1: "#70c878", c2: "#3e9a4a", disabled: dis, title: "Mark reviewed (r)", onClick: () => onAct("reviewed") },
         { label: "HUBSPOT", c1: "#6aa4f0", c2: "#3a74c8", href: HS_CONTACT(r.contact_id), title: "Open in HubSpot (h)" },
       ]} />
-      <Section title="TOUCH TIMELINE">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+
+      <Section title="Touch timeline">
+        <div className="bdr-stats">
           <Stat label="Created" value={fmtDate(r.created)} sub={fmtAgo(r.created)} />
           <Stat label="Speed to lead" value={stl == null ? (r.first_touch ? "pre-existing" : "not yet") : `${stl}h`} tone={stlTone}
             sub={r.first_touch ? `first touch ${fmtDate(r.first_touch)}` : "no touch logged"} />
           <Stat label="Last touch" value={fmtAgo(r.last_touch)} tone={dsl == null || dsl > 7 ? C.danger : undefined}
             sub={r.last_by ? `${r.last_by} · ${r.last_channel}` : undefined} />
-          <Stat label="Last reply" value={fmtAgo(r.last_reply)} tone={r.last_reply && (!r.last_touch || r.last_reply > r.last_touch) ? "#5fb3ff" : undefined}
+          <Stat label="Last reply" value={fmtAgo(r.last_reply)} tone={r.last_reply && (!r.last_touch || r.last_reply > r.last_touch) ? "#2f7fd6" : undefined}
             sub={r.last_reply && (!r.last_touch || r.last_reply > r.last_touch) ? "awaiting our response" : undefined} />
         </div>
-        <div style={{ fontSize: fs(10.5), color: C.muted, marginTop: 6 }}>
-          Email last opened <b style={{ color: r.last_opened && (!r.last_touch || r.last_opened > r.last_touch) ? C.accent : C.text }}>{fmtAgo(r.last_opened)}</b>
-          {r.last_clicked ? ` · last clicked ${fmtAgo(r.last_clicked)}` : ""}
-          {" · "}web: {r.page_views} page views{r.pricing_visits ? ` · ${r.pricing_visits} pricing visits` : ""}{r.last_page ? ` · last page ${r.last_page}` : ""}
-          {r.page_cats.length ? ` · ${r.page_cats.join(", ")}` : ""}
-        </div>
         {overTop && (
-          <div style={{ fontSize: fs(10.5), color: C.warn, marginTop: 6 }}>
-            Last touch came from {r.last_by || "someone else"} (not the queue owner) — check before reaching out.
+          <div style={{ fontSize: tx(12.5, 10.5), color: C.warn, marginTop: SP.md }}>
+            Last touch came from {r.last_by || "someone else"} (not the queue owner). Check before reaching out.
           </div>
         )}
-        <div style={{ marginTop: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(10.5), color: C.faint }}>
+        <div style={{ marginTop: SP.lg }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: SP.sm, fontSize: tx(12, 10.5), color: C.faint, flexWrap: "wrap" }}>
             <span>Cadence (14d): {r.touches_14d} HubSpot + {r.ov?.linkedin_14d ?? 0} LinkedIn · {r.calls_total} calls ({r.calls_connected} connected) all-time</span>
-            <span>target ~{CADENCE_TARGET_14D}</span>
+            <span>{touches}/{CADENCE_TARGET_14D} touches</span>
           </div>
           {UI.game ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-              <span style={{ background: "#e8b830", color: "#303030", fontSize: fs(10), fontWeight: 700, padding: "0 5px", borderRadius: 3, border: "1px solid #484848" }}>HP</span>
-              <div style={{ flex: 1, height: 8, background: "#f2f2f2", border: "2px solid #484848", borderRadius: 4, overflow: "hidden" }}>
-                <div style={{ width: `${cadPct}%`, height: "100%", background: cadPct >= 100 ? "#48c050" : cadPct >= 50 ? "#f0c030" : "#f05030" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: SP.sm, marginTop: 6 }}>
+              <PixelText text="HP" px={14} color="#303030" />
+              <div style={{ flex: 1, height: 10, background: "#eef0f3", border: "2px solid #484848", borderRadius: 5, overflow: "hidden" }}>
+                <div style={{ width: `${cadPct}%`, height: "100%", background: cadPct >= 100 ? "#48c050" : cadPct >= 50 ? "#f0c030" : "#f05030", transition: "width .4s ease" }} />
               </div>
             </div>
           ) : (
@@ -943,60 +1296,66 @@ function Card({ r, acting, busy, onAct, runMsg }: { r: Row; acting: string; busy
         </div>
       </Section>
 
-      <Section title="TRIAL & USAGE">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-          <Stat label="Plan" value={r.plan ? r.plan.replace("_", " ") : ""} sub={r.lifecycle || undefined} />
-          <Stat label="Trial ends" value={r.trial_end_date} />
-          <Stat label="CPU-h 7d" value={r.org_name ? r.cpu_7d.toFixed(1) : ""} tone={ratio != null && ratio >= 3 ? "#ffa94d" : undefined}
-            sub={ratio != null ? `${ratio.toFixed(1)}x vs prior wk` : r.cpu_7d > 0 ? "new this week" : undefined} />
-          <Stat label="AWR" value={r.awr > 0 ? fmtUsd(r.awr) : ""} tone={r.awr >= 6000 ? "#38d9a9" : undefined} />
-        </div>
-        <div style={{ fontSize: fs(10.5), color: C.faint, marginTop: 4 }}>
-          {r.org_name ? `Org: ${r.org_name}${r.org_count > 1 ? ` (+${r.org_count - 1} more)` : ""}` : "No MotherDuck org linked"} · lead status: {r.lead_status || "—"}
-        </div>
-        <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
-          <Milestone done={r.m_add_data} label="Added data" />
-          <Milestone done={r.m_connect_tools} label="Connected tools" />
-          <Milestone done={r.m_share_data} label="Shared data" />
-        </div>
-      </Section>
-
-      <Section title="ACTIONS">
+      <Section title="Actions">
         {!canEdit && (
-          <div style={{ fontSize: fs(11), color: C.faint, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-            <Lock size={12} /> Read-only: only {bdrName(r.queue_owner_id)} can change this contact. Switch "Acting as" if that's you.
+          <div style={{ fontSize: tx(12.5, 11), color: C.faint, marginBottom: SP.md, display: "flex", alignItems: "center", gap: 6 }}>
+            <Lock size={13} /> Read-only: only {bdrName(r.queue_owner_id)} can change this contact. Switch "Acting as" if that's you.
           </div>
         )}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          <button disabled={dis} style={btn(C.ok, dis)} onClick={() => onAct("reviewed")}><Check size={12} /> Reviewed</button>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm }}>
+          <button disabled={dis} style={btn(C.ok, dis)} onClick={() => onAct("reviewed")}><Check size={13} /> Reviewed</button>
           {[3, 7, 14].map((d) => (
-            <button key={d} disabled={dis} style={btn(C.warn, dis)} onClick={() => onAct("retouch_set", { days: d })}><RotateCcw size={12} /> Retouch {d}d</button>
+            <button key={d} disabled={dis} style={btn(C.warn, dis)} onClick={() => onAct("retouch_set", { days: d })}><RotateCcw size={13} /> Retouch {d}d</button>
           ))}
-          <span style={{ display: "inline-flex", gap: 4 }}>
-            <input value={days} onChange={(e) => setDays(e.target.value.replace(/\D/g, "").slice(0, 3))} style={{ ...ctl, width: 42 }} disabled={dis} />
+          <span style={{ display: "inline-flex", gap: SP.xs }}>
+            <input value={days} aria-label="Retouch in how many days" onChange={(e) => setDays(e.target.value.replace(/\D/g, "").slice(0, 3))} style={{ ...ctl, width: 52 }} disabled={dis} />
             <button disabled={dis || !days} style={btn(C.warn, dis || !days)} onClick={() => onAct("retouch_set", { days: Number(days) })}>days</button>
           </span>
           {r.ov?.retouch_on && <button disabled={dis} style={btn(C.muted, dis)} onClick={() => onAct("retouch_clear")}>Clear retouch ({r.ov.retouch_on})</button>}
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-          {[["linkedin_request_sent", "Request sent"], ["linkedin_accepted", "Accepted"], ["linkedin_message", "Messaged"], ["linkedin_reply", "They replied"]].map(([t, l]) => (
-            <button key={t} disabled={dis} style={btn("#5fb3ff", dis)} onClick={() => onAct(t)}><Linkedin size={12} /> {l}</button>
-          ))}
-          <div style={{ flexBasis: "100%", marginTop: 2 }}><LiTimeline li={liInfo(r.ov, r.hs_li)} /></div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, marginTop: SP.md }}>
+          <LiButtons li={liInfo(r.ov, r.hs_li)} cid={r.contact_id} dis={dis} pendingKeys={pendingKeys} onAct={(t) => onAct(t)} />
+          <div style={{ flexBasis: "100%", marginTop: SP.xs }}><LiTimeline li={liInfo(r.ov, r.hs_li)} /></div>
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Quick note (stays in the terminal)" disabled={dis}
-            style={{ ...ctl, flex: 1 }} />
+        <div style={{ display: "flex", gap: SP.sm, marginTop: SP.md }}>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Quick note (stays in the terminal)" disabled={dis} aria-label="Quick note"
+            style={{ ...ctl, flex: 1, minWidth: 0 }} />
           <button disabled={dis || !note.trim()} style={btn(C.accent, dis || !note.trim())} onClick={() => { onAct("note", { note }); setNote(""); }}>
-            <StickyNote size={12} /> Save
+            <StickyNote size={13} /> Save
           </button>
         </div>
-        {r.ov?.last_note && <div style={{ fontSize: fs(10.5), color: C.muted, marginTop: 6 }}>Last note ({fmtAgo(r.ov.last_note_ts)}): {r.ov.last_note}</div>}
-        {runMsg && <div style={{ fontSize: fs(10.5), color: runMsg.startsWith("✗") ? C.danger : C.accent, marginTop: 6 }}>{runMsg}</div>}
+        {r.ov?.last_note && <div style={{ fontSize: tx(12, 10.5), color: C.muted, marginTop: SP.sm }}>Last note ({fmtAgo(r.ov.last_note_ts)}): {r.ov.last_note}</div>}
+        <SaveStatus msg={runMsg} stuck={stuck} onRetry={onRetry} block />
       </Section>
 
+      <Expander id="engagement" title="Engagement" summary={engageSummary} defaultOpen={engagedSinceTouch}>
+        <div style={{ fontSize: tx(13, 10.5), color: C.muted, lineHeight: 1.7 }}>
+          <div>Email last opened <b style={{ color: engagedSinceTouch ? C.accent : C.text }}>{fmtAgo(r.last_opened)}</b>{r.last_clicked ? ` · last clicked ${fmtAgo(r.last_clicked)}` : ""}</div>
+          <div>Web: {r.page_views} page views{r.pricing_visits ? ` · ${r.pricing_visits} pricing visits` : ""}{r.last_page ? ` · last page ${r.last_page}` : ""}</div>
+          {r.page_cats.length > 0 && <div>Sections: {r.page_cats.join(", ")}</div>}
+        </div>
+      </Expander>
+
+      <Expander id="usage" title="Trial & usage" summary={usageSummary}>
+        <div className="bdr-stats">
+          <Stat label="Plan" value={r.plan ? r.plan.replace("_", " ") : ""} sub={r.lifecycle || undefined} />
+          <Stat label="Trial ends" value={r.trial_end_date} />
+          <Stat label="CPU-h 7d" value={r.org_name ? r.cpu_7d.toFixed(1) : ""} tone={ratio != null && ratio >= 3 ? "#d9822b" : undefined}
+            sub={ratio != null ? `${ratio.toFixed(1)}x vs prior wk` : r.cpu_7d > 0 ? "new this week" : undefined} />
+          <Stat label="AWR" value={r.awr > 0 ? fmtUsd(r.awr) : ""} tone={r.awr >= 6000 ? "#139a7a" : undefined} />
+        </div>
+        <div style={{ fontSize: tx(12, 10.5), color: C.faint, marginTop: SP.sm }}>
+          {r.org_name ? `Org: ${r.org_name}${r.org_count > 1 ? ` (+${r.org_count - 1} more)` : ""}` : "No MotherDuck org linked"} · lead status: {r.lead_status || "—"}
+        </div>
+        <div style={{ display: "flex", gap: SP.lg, marginTop: SP.md, flexWrap: "wrap" }}>
+          <Milestone done={r.m_add_data} label="Added data" />
+          <Milestone done={r.m_connect_tools} label="Connected tools" />
+          <Milestone done={r.m_share_data} label="Shared data" />
+        </div>
+      </Expander>
+
       <div id={`draft-${r.contact_id}`}>
-        <Section title="DRAFT NEXT TOUCH">
+        <Section title="Draft next touch">
           <DraftBox r={r} acting={acting} />
         </Section>
       </div>
@@ -1017,7 +1376,6 @@ const CREATURE_PALS = {
   in: { d0: "#2b2d42", d1: "#f08c00", d2: "#5fa8e8", d3: "#ffe066" },   // duck line: yellow body, blue wing
   out: { d0: "#343a40", d1: "#fd7e14", d2: "#b8c4ce", d3: "#ffffff" },  // goose line: white body, grey wing
 };
-const palFor = (ob: boolean, shiny: boolean) => (shiny ? SHINY : UI.game ? (ob ? CREATURE_PALS.out : CREATURE_PALS.in) : GB);
 // grass pad under the creature, like a DS battle platform
 const STAGE = (shiny: boolean): any => ({
   background: `radial-gradient(ellipse 48% 15% at 50% 86%, ${shiny ? "#f0d070" : "#9ad8a8"} 0 66%, ${shiny ? "#c8a030" : "#5aa870"} 67% 80%, rgba(0,0,0,0) 82%)`,
@@ -1026,60 +1384,7 @@ const STAGE = (shiny: boolean): any => ({
 const BATTLE_BG: any = { background: "linear-gradient(180deg, #ffffff 0%, #f0f0f0 50%, #dedede 100%)", borderRadius: 6, padding: 12, border: "2px solid #c8c8c8" };
 const NAMEPLATE: any = { background: "linear-gradient(180deg, #ffffff 0%, #e6e6e6 100%)", border: "2px solid #484848", borderRadius: "4px 4px 22px 4px", padding: "8px 14px", boxShadow: "3px 3px 0 #b0b0b0", alignSelf: "flex-start" };
 const SHINY = { d0: "#3b2500", d1: "#8a5a00", d2: "#e0b030", d3: "#ffe9a8" };
-const SPRITE_PEEP = [
-  "................",
-  "......0000......",
-  ".....033330.....",
-  "....03333330....",
-  "....03303330....",
-  "....033333300...",
-  "....0333333110..",
-  ".....03333000...",
-  "....0333333330..",
-  "...033223333330.",
-  "...032222333330.",
-  "...033223333330.",
-  "....0333333330..",
-  ".....00000000...",
-  "......1..1......",
-  ".....11..11.....",
-];
-const SPRITE_QUACK = [
-  "................",
-  ".....00000......",
-  "....0333330.....",
-  "...033033330....",
-  "...033333330000.",
-  "...03333330111.0",
-  "....0333330000..",
-  ".....033330.....",
-  "..000333333000..",
-  ".03333333333330.",
-  "0333222222333330",
-  "0332222222233330",
-  ".03322222223330.",
-  "..003333333300..",
-  "....00000000....",
-  ".....11...11....",
-];
-const SPRITE_MALLA = [
-  ".....0.00.0.....",
-  "....01011010....",
-  "....00333300....",
-  "...0330333330...",
-  "...033333333000.",
-  "...0333333301110",
-  "....03333330000.",
-  "0....0333330...0",
-  "00..033333330.00",
-  "0200333333333020",
-  "0222332222333220",
-  ".02232222223220.",
-  "..0332222223300.",
-  "...0033333300...",
-  "....00000000....",
-  "....11....11....",
-];
+
 
 const QUARTERS = [
   { id: "FQ4-2026", label: "Q4 FY27", start: "2026-11-01", end: "2027-01-31" },
@@ -1131,6 +1436,8 @@ function xpOf(r: any, ob: boolean) {
   return finishXp(xp, today, c);
 }
 type XpInfo = ReturnType<typeof xpOf>;
+// Daily caps (events per day), same as the game SQL: a click past the cap earns 0 EXP
+const XP_CAP: Partial<Record<XpKind, number>> = { linkedin: 30, queue: 40 };
 // Terminal clicks that earn XP (credited optimistically until the ledger catches up)
 const xpForEvent = (t: string, ob: boolean): [XpKind, number] | null =>
   t.startsWith("linkedin_") ? ["linkedin", XP.linkedin]
@@ -1140,10 +1447,11 @@ const currentQuarter = () => {
   return QUARTERS.find((q) => q.start <= d && d <= q.end) ?? QUARTERS[0];
 };
 
+const ART = (id: string) => ["@art:" + id]; // creature art lives in PIXEL_ART_HD_A/B below
 const SPECIES = [
-  { name: "PEEPBIT", map: SPRITE_PEEP, base: { hp: 45, atk: 49, def: 49, spd: 45, spc: 65 }, flavor: "Hatches every quarter. Chirps at anything that signs up." },
-  { name: "QUACKRAFT", map: SPRITE_QUACK, base: { hp: 60, atk: 62, def: 63, spd: 60, spc: 80 }, flavor: "Has learned that a follow-up is worth ten first touches." },
-  { name: "MALLAGON", map: SPRITE_MALLA, base: { hp: 80, atk: 82, def: 83, spd: 80, spc: 100 }, flavor: "Its call can be heard three Slack channels away." },
+  { name: "PEEPBIT", map: ART("Default_in_1"), base: { hp: 45, atk: 49, def: 49, spd: 45, spc: 65 }, flavor: "Hatches every quarter. Chirps at anything that signs up." },
+  { name: "QUACKRAFT", map: ART("Default_in_2"), base: { hp: 60, atk: 62, def: 63, spd: 60, spc: 80 }, flavor: "Has learned that a follow-up is worth ten first touches." },
+  { name: "MALLAGON", map: ART("Default_in_3"), base: { hp: 80, atk: 82, def: 83, spd: 80, spc: 100 }, flavor: "Its call can be heard three Slack channels away." },
 ];
 
 const MOVES = [
@@ -1295,7 +1603,6 @@ const PIXEL_ART_HD_B: Record<string, { w: number; h: number; p: string; r: strin
   Rebecca_out_2: { w: 64, h: 75, p: "f9af38,fc7212,ff6e12,fd6e12,fe6d11,fe5d0b,e95510,f03015,f71607,e5281c,9a1f1f,180728,140224,100123,110020", r: "31.lk31.|31.l2n30.|31.mgon29.|31.mfgl29.|31.l2fgn28.|25.mn3.lh2fgn28.|24.nkon2l4fgn28.|23.nmflm2fe3fln28.|22.nogfjhfba3fmk3n25.|22.nk4fb2a2fim2kmn25.|22.lfb2fb3a2fijhikn25.|22.kf7a2fh3iko25.|22.kf5ab3f3ijm26.|22.kf5ah5ijo27.|21.mkfb3af2hefio3n26.|19.2ol2kf2a2f5edk3n25.|18.nmb2ekhbf7e2cgk2n24.|17.nmb3egjf7e4cfko24.|16.mlb11e5c3eflo23.|16.mlbc9e5c5eg2n22.|15.2n4c7e3c9eln22.|15.2ne2c18e2clml21.|14.lngdk2b6ec3egkg2e4cjnm21.|14.2nblmk6c4egl2nb4cejmn17.no2.|14.2ndoaoe5c4ek2anlb2c2ejmo16.4n.|14.2ndoaoe5c4eo2anl2c3ejmn15.2nj2n.|2.2n10.2nd2nme2c2b3ecd4nm5ehln15.nkg2n.|.4n9.2nb2nleb3ob3cbm3nm3e2chln14.mlgf2n.|.nkgo9.nmbkmldk3bk4bm3nm3ecgjlm13.nlg2f2n.|.okhkn8.nm2bknma4bl2b2dmnmb4e2jln12.nog3fmn.|.nkfgml8.nlb2m2abgk2blod2e3bc2egjln12.nogh2fhml.|.nk2fg2n7.3nl2a7bko2e5cehj2o10.2nogh3fmn2.|.nk2fhg2l5.l3n2a8bko3e4ch2j2o9.n2o2g3fgmo2.|2.n2hf2h2n3.lnb3a7bfg2o4ecbh2jlo8.3n2a5fkna2o|2.nkh3fg2l2.2n9bfgknod4ef3jlm7.2mnl3ai3fg3m2n|2.2ohfhifgm2l.3n8gl2m2bd2e4j2l7.3nk4a2ihgon2ljn|o3nk2fifeg3n.l2no3n2ml10jl2n6.n2ol6a3ikmo2hkm|2o3lgfhi2fgklnk2a4lml2k8j3o5.n2l8a5i3hkmn|2ohfgk2hijh3egko6anlk8jo6.nl3a2b4a4ih2fhi2n.|.nkf4hi4j3e2kl4an10jn5.nl2a2b4ce4i3f2iln2.|.lnk2h2fa6jecgm4am9jg2n3.2n2ab3cdce4a5ilm3.|2.nlj3f2a6j2cg4nke5jd2cdkn3.nbabed4c5a4ilon3.|3.n2lhi3ah5j2eg3lbd4e5cbknonlab3ed2cb4a2il3o5.|3.2mnk2i3a7jcglk4ec4edc2bl3abdec2e2ca2b4im5n3.|3.3nok2iag9jlbce4cdcd2cbkb2a8e7i2h2fh2n3.|3.lj7i8jla3c3d6cbkbd2c7e3abi3h3fmo4.|4.l4if3a6jklbe4cdcd4c3d2ed3c2e5a3if2hlnm5.|5.nl4i4a4jma2ecd6c3d3c3e3ci5a5ilnon6.|6.2nl6i3jklaec3d4c4d5ce3ca6io5n8.|7.n4m3ie2j2lac3dcdc2dec3d4ce2hb2af5h3o10.|9.2lj2i2jkjmoa4c3dcdcdcd2ce2jhe4i7hko10.|8.nm4joljknoa4c3dcdc2d5cjk3j2hlmg4hmn10.|9.o4no3k2mb8cdcd6c2jolj2hjo4n2m11.|11.3nolklmld3c2e2dcd3c6e2jkml2koklnm13.|14.non2mlk2cecd8c5eh3j4kjmn14.|19.nl3ec2dcd3c2ec4e9jo15.|19.noj2ecd6c2e3ce7jhjln15.|20.okjd5cd2ce4c7jhjkn16.|20.2nk2j5ce3c11jkln16.|21.2lk20jl2m17.|22.3nk17jon19.|23.4o14jl2o20.|23.lokjl2mn2om6jln22.|24.2ok2jlno2nml3jl2m22.|25.2n3mn3.m2n2on24.|25.lngk2n5.nlgl24.|22.o2nmlgkno5.nljl24.|17.o2nm4lk3gmn5.nlgln23.|16.2o3kjgd2e3bmn4.nl3bmn22.|16.2nlgd2b2gbegon4.2o5bon21.|17.mnmebgd2bg2o4.2m7bmn20.|18.n3on2bgln4.nl2bdgbedcbon19.|22.2m3n5.obmlgbeg2ob2n19.|32.2o2nm2g4o2n19.|36.m3n24." },
   Rebecca_out_3: { w: 62, h: 81, p: "fdcb66,ffb124,ffa41f,f49922,fe6310,fe400d,f95311,c95121,eb3114,e11c15,b91627,670f25,1b0325,0e0224,0f001f", r: "26.2n34.|18.2n6.3n33.|18.ngo5.nin33.|18.ngn4.2nfn33.|17.nmgn4.ndfm33.|16.nmein3.2ndfm33.|14.2nmejkn.2nogikm33.|13.n2mdekl2nmecj2kn33.|11.nom2dehmnmide3kon33.|10.nm2cfkl2h2dh4kmn34.|9.nmbdfi2hei6knm4.2n29.|8.nmde5f4k3m2n3.noho29.|8.nde5f5kfe2dm2nmnhko29.|7.nmdg4fjg2e3kif2dc3bjko6.2j9.3n9.|6.2nle4fc5bci5ked2jkn5.f2i8.mkhn9.|5.no2lg2fec9b8km5.i2ei6.om3fn9.|4.nm2bl3f11bcln4kmn5.jd2e5.no4fn9.|4.ne2beic13bdl3non6.fdej5.m5fo6.j2.|3.nm2ab2d13bedemnl8.gfi5.m5fio7.j.|2.lod16bd2fdbm11.i5.o7fio6.2j|2.2ng11be7fdb2m15.2o3fb3fin5.i2j|2.2nje9b9fceim15.mj2f2b3fin4.i2ei|2.2nmg8b2g5noifc2en8.2m2n2.nj2f4b2fin3.f3ej|2.nlam7beg2nml2am2fcego7.mkfhn2.n2f5b2fin2.j4ei|2.nkln7bf2na2k2amfebego6.mk2fgm2.lg2b2c2b2fko2.idbei.|2.ni2nb2h4binolfh2ameb2egn6.o4fk2njfbe2k2b2fl3.jfdi2.|2.njlnl2dl2bcomolg2al3b2eln5.oife2fknmjfb3kbc2fn3.a2i3.|2.olgn2a2dhcedgmidahc2bc2e2m5.o2fbcfknm2fb2jkbefin9.|2.nomabdg2eld4bcbc3begkm6.nf3bfk2n2fb2j2bgfm6.4o|2.noab5edld7bc3jln5.nkfbkeckol2fbj2befio4.3nhio|.2nab7edlm5be3jkon5.n2fb2kckoj2f3b3fln3.onhg2fo|2nabd5em2onc4be3jk2o6.n2fbkbckoi2fb5fm3.ok4fmn|oac3dho2lkl2i4e4jkon4.mn.o2febcfkl2fc6fn2.l6fn.|odeg2nmklno2k9jln4.ngo.o3fbgf2h2fb5fm2.l2gebc2fo.|od2o7n2o8jkm5.n2f2o3fc2fkhf2d4fio.ohd3bg2fo.|3o6.mnk9j2n5.n2fgoi2fcfgmhfc5foaomedjcbg2fm.|10.nk7jehn6.nfde2l2fcfinkfc5fnomfc2kcbgfm2.|10.n6j3e2o6.nfcfimkc2fimkce4flnm2fc2kcb2gm2.|9.2n4j5eo7.nic2jmjd3kmkc5f2m2fecjec2f2m2.|9.m10eo8.nifklkd2kl2keif2klm2fe2ce3flm3.|8.oh7e2bem8.okf3kd2kmke5knlgdbe4fkm4.|7.no5ed4beln7.oli3kd2kmki4kmlkdcg4flm5.|6.hncb2d8bem4nol2.n3kmd2km5k2lk2eij2ijmn6.|5.nld12b2g3bd3onal2kmdklki3k2lk2e5klm7.|4.2nda11bge7be3n2kmikmkg2k2lkh6klal2no3n.|3.mdna11b2eb3a6bdn2m3kmg2k2lke6k4nmg2ign.|2.2ndm12bkb3a8bghomkml3klkg5k3oki5fjn.|2.oemh11bgkb2a9b3gdm4klkg4k2no2kg2cbg2fmo.|.2oeog10bdgm9bij2cegdim9k2ml2kidkdb2gmn2.|.oegoecd6beb2go10bf2jbeicel5k3m8kcdfln3.|.ogfofde3bd2b2kgio7b2fc2bjib2ibhl2kmo7k3bcdflo4.|.ogfof2k3bk2b2k2foe6bc2j3b4i3bon5k2eg4kfl2o5.|.ogfm2fk2be2kbk3fm2ebc2fdb2j5id5bnm11kl2n6.|.n2im2fihbkf2k4fkme2cegebf2i2bi2j6bd2l5klonm9.|.nikli2f2ik8fmgecegie2bf3b2jgig5ben5o12.|2.ngjm3f2i8fjm4e3i2fgcdjibcijih2ben17.|2.mkjmi13fklge2def3ijife4bd3m2n17.|3.nl2mi11fi2kl2ie2dijfe2d2ec3bcdhn18.|3.noko2k10f4klk2i4jd3bd2e2dh2o19.|4.omom2k3j4f8k3l2j2ig4ege3o20.|5.o2nm18ko11mn22.|7.3n24kl2n25.|9.2n23kon26.|10.3o18k4o27.|11.4om6kl8k2o29.|12.o2k3m2on2ol7kn30.|13.2m5komlo6kmn30.|14.2n3k2o2ahn4kon31.|15.5o4ahn4o32.|16.o2ho6ao2ho32.|16.o2hn6ao2ho32.|15.no2hm6an2ho32.|14.nmhgo7am2hn32.|8.7mh2e3m4anm2em32.|7.m6hg2e3hmn2aom3eln31.|7.m2he2h2ehmn.3nml2h3ehn31.|7.3o2melmon3.2me3heh2en31.|8.4nm2n5.mdemk2em2en31.|11.o2n6.oe2n2el2oen31.|20.2o.nhl4on31.|23.n2o3.o32." },
 };
-const ART = (id: string) => ["@art:" + id];
 const artCache: Record<string, { w: number; h: number; pal: string[]; runs: number[][] }> = {};
 function getArt(id: string) {
   if (artCache[id]) return artCache[id];
@@ -1310,27 +1617,48 @@ function getArt(id: string) {
   return (artCache[id] = { w: a.w, h: a.h, pal, runs });
 }
 
-function Sprite({ map, pal, scale = 6, flip = false }: { map: string[]; pal: any; scale?: number; flip?: boolean }) {
-  if (map[0]?.startsWith("@art:")) {
-    const a = getArt(map[0].slice(5));
-    if (!a) return null;
-    const raw = (scale * 16) / Math.max(a.w, a.h, 96);
-    const k = raw >= 1 ? Math.floor(raw) : raw; // whole screen pixels per art pixel when enlarged = crisp edges
-    const filter = pal === SHINY ? "sepia(0.55) saturate(1.9) hue-rotate(-12deg) brightness(1.12)"
-      : !UI.game ? "grayscale(1) sepia(1) hue-rotate(45deg) saturate(1.7) brightness(0.85)" : undefined;
-    return (
-      <svg width={a.w * k} height={a.h * k} viewBox={`0 0 ${a.w} ${a.h}`} shapeRendering="crispEdges" style={{ imageRendering: "pixelated" as any, filter }}>
-        {a.runs.map(([x, y, n, c], i) => <rect key={i} x={x} y={y} width={n + 0.02} height={1.02} fill={a.pal[c]} />)}
-      </svg>
-    );
-  }
-  const col: Record<string, string> = { "0": pal.d0, "1": pal.d1, "2": pal.d2, "3": pal.d3 };
-  const w = map[0]?.length || 16, h = map.length || 16;
-  const rects: any[] = [];
-  map.forEach((row, y) => row.split("").forEach((ch, x) => {
-    if (ch !== ".") rects.push(<rect key={`${x}-${y}`} x={flip ? w - 1 - x : x} y={y} width={1.02} height={1.02} fill={col[ch]} />);
-  }));
-  return <svg width={16 * scale} height={(16 * scale * h) / w} viewBox={`0 0 ${w} ${h}`} style={{ imageRendering: "pixelated" as any }}>{rects}</svg>;
+// Creature sprite sized to a slot. h = slot height in px.
+//   fit="line": evolutions keep their relative size (bigger forms look bigger), for showcases and stages
+//   fit="box":  every form fills the slot, for small slots like list rows (~28px)
+// Enlarging uses whole screen pixels per art pixel so edges stay crisp; max-width 100% lets it shrink in narrow containers.
+function Sprite({ map, pal, h = 96, flip = false, fit }: { map: string[]; pal: any; h?: number; flip?: boolean; fit?: "line" | "box" }) {
+  const a = map[0]?.startsWith("@art:") ? getArt(map[0].slice(5)) : null;
+  if (!a) return null;
+  const mode = fit ?? (h <= 48 ? "box" : "line");
+  const raw = h / (mode === "box" ? Math.max(a.w, a.h) : Math.max(a.w, a.h, 96));
+  const k = raw >= 1 ? Math.floor(raw) : raw;
+  const filter = pal === SHINY ? "sepia(0.55) saturate(1.9) hue-rotate(-12deg) brightness(1.12)"
+    : !UI.game ? "grayscale(1) sepia(1) hue-rotate(45deg) saturate(1.7) brightness(0.85)" : undefined;
+  return (
+    <svg width={Math.round(a.w * k)} height={Math.round(a.h * k)} viewBox={`0 0 ${a.w} ${a.h}`} shapeRendering="crispEdges" aria-hidden="true"
+      style={{ imageRendering: "pixelated" as any, filter, maxWidth: "100%", height: "auto", maxHeight: h, display: "block", transform: flip ? "scaleX(-1)" : undefined }}>
+      {a.runs.map(([x, y, n, c], i) => <rect key={i} x={x} y={y} width={n + 0.02} height={1.02} fill={a.pal[c]} />)}
+    </svg>
+  );
+}
+// Fills its container's width up to maxH (Trainer battle stage). Measures with ResizeObserver; integer-scales when enlarging.
+function useBoxWidth<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setW(Math.round(e.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w] as const;
+}
+// pad = style for a wrapper hugging the sprite (e.g. the grass platform), so it scales with the creature, not the stage
+function SpriteFill({ map, pal, maxH, minH = 64, pad }: { map: string[]; pal: any; maxH: number; minH?: number; pad?: any }) {
+  const [ref, w] = useBoxWidth<HTMLDivElement>();
+  const padX = pad ? 40 : 0;
+  const h = Math.max(minH, Math.min(maxH, w ? w - padX : maxH)); // creature art is roughly square
+  return (
+    <div ref={ref} style={{ width: "100%", display: "flex", justifyContent: "center", alignItems: "flex-end" }}>
+      <div style={{ ...pad, lineHeight: 0, maxWidth: "100%", boxSizing: "border-box" }}><Sprite map={map} pal={pal} h={h} fit="line" /></div>
+    </div>
+  );
 }
 
 const gen1Stat = (base: number, statExp: number, lv: number, hp = false) => {
@@ -1356,14 +1684,11 @@ function GbBox({ children, style }: any) {
 
 
 // ---- Outbound creature (separate XP: only Apollo-sourced contacts + Outbound-source deals) ----
-const SPRITE_HONK = ["................","................","......000.......",".....03330......",".....030330.....",".....03333000...","......033311110.","......03300000..","......0330......","....003333000...","...03333333330..","..0333222233330.","..0332222223330.","...03333333300..","....000000000...",".....11...11...."];
-const SPRITE_GANDER = [".....000........","....03330.......","....030330......","....0333301110..",".....033300000..",".....0330.......",".....0330...00..","....033300.0220.","..0033333302220.",".033333333322220","0333222222333320","0332222222233330",".03322222223330.","..003333333300..","....00000000....","....11....11...."];
-const SPRITE_SKY = ["...1.000........","..1.03330.......","....030330...00.","....033330111020","00...03330000022","0200.0330...0222","02220.0330.02222","0222200333002222",".022203333333222","..02233333333330","..0332222223330.",".03322222222330.","..0332222233300.","...00333333000..","....00000000....","....11....11...."];
 const DEFAULT_OB_TARGET = 10; // FQ4 policy: 55 inbound + 10 outbound; >100% attainment unlocks only once outbound target is met
 const OB_SPECIES = [
-  { name: "HONKLET", map: SPRITE_HONK, base: { hp: 44, atk: 52, def: 44, spd: 56, spc: 60 }, flavor: "Waddles up to strangers. Usually gets ignored." },
-  { name: "GANDERWING", map: SPRITE_GANDER, base: { hp: 60, atk: 70, def: 58, spd: 72, spc: 75 }, flavor: "Never flies alone; always brings three contacts from the same account." },
-  { name: "SKYGANDER", map: SPRITE_SKY, base: { hp: 80, atk: 92, def: 76, spd: 95, spc: 95 }, flavor: "Its honk reaches the VP of Data before the gatekeeper notices." },
+  { name: "HONKLET", map: ART("Default_out_1"), base: { hp: 44, atk: 52, def: 44, spd: 56, spc: 60 }, flavor: "Waddles up to strangers. Usually gets ignored." },
+  { name: "GANDERWING", map: ART("Default_out_2"), base: { hp: 60, atk: 70, def: 58, spd: 72, spc: 75 }, flavor: "Never flies alone; always brings three contacts from the same account." },
+  { name: "SKYGANDER", map: ART("Default_out_3"), base: { hp: 80, atk: 92, def: 76, spd: 95, spc: 95 }, flavor: "Its honk reaches the VP of Data before the gatekeeper notices." },
 ];
 const OB_MOVES = [
   { lv: 1, name: "LIST BUILD", type: "NORMAL" },
@@ -1379,62 +1704,30 @@ const OB_MOVES = [
 ];
 
 // ---- Per-BDR trainer classes + creature lines (original pixel designs, 24x24) ----
-const CREATURE_MAPS: Record<string, string[]> = {
-  KINDLIT: ["........................", "........................", "........................", "........................", ".......0...0............", "......020.020...........", ".....02200020...........", ".....02222220...........", ".....02222220...........", "....0222222220......0...", "....0222202220.....010..", "....0233302220....0110..", ".....0333222200..01110..", "....03333222222001110...", ".....0002222222211110...", "......022222222221110...", "......022333333221110...", "......02233333322000....", ".......0233333320.......", "........02222220........", ".........0220220........", ".........0220220........", "..........00.00.........", "........................"],
-  BLAZETAIL: ["....0.....0.............", "...020...020............", "...0220..020.......0....", "...0220.0220......010...", "...022200220......010.0.", "...022222220......010010", "...0222222220....0110110", "...0222202220....010110.", "...0222202220...0111110.", "..033333222200..0111110.", "...03333222332000111110.", "...03332233322221111110.", "....0002233222222111110.", ".....02222333322221110..", ".....02233333333221110..", ".....02233333333221110..", "......023333333320000...", "......022233332220......", "......022022220220......", "......022022000220......", "......0220220.0220......", "......0220220.0220......", ".......00.00...00.......", "........................"],
-  PYRALYNX: ["..010...010.............", "..020...020.........0...", "..0220.0220........0100.", "..022200220........01010", "..022222220........00110", "..0222222220..0...011110", "..02222222200010..011110", ".02222202221110..0111110", ".023332021111100.0111110", "..033332111112220111110.", ".0333332211111112211110.", "..000222211111122221110.", ".....022231111333222110.", ".....022333113333322110.", ".....022333333333322110.", "......0233333333332000..", "......02233333333220....", "......02202222220220....", "......02202200220220....", "......02202200220220....", "......02202200220220....", "......02202200220220....", "......02202200220220....", ".......00.00..00.00....."],
-  HOOTLET: ["........................", "........................", "........................", "........................", "......0..........0......", ".....020........020.....", ".....0220......0220.....", ".....02220000002220.....", ".....02222222222220.....", ".....02233322333220.....", "......033333333330......", ".....02331333313320.....", ".....02230333303220.....", ".....02223311332220.....", ".....02233333333220.....", ".....02233333333220.....", ".....02233333333220.....", "......023333333320......", "......022333333220......", ".......0023333200.......", "........011000110.......", "........0110.0110.......", ".........00...00........", "........................"],
-  DUSKOWL: ["....020..........020....", "....0220........0220....", "....02220......02220....", "....022220....022220....", ".....022220..022220.....", ".....02220000002220.....", ".....02002222220020.....", "......003332233300......", ".....00331333313300.....", "....0223313333133220....", "...022223033330322220...", "...022222331133222220...", "...022222333333222220...", "...022223333333322220...", "...022223332323322220...", "...022223333333322220...", "...022223332323322220...", "...022223333333322220...", "....0222233232322220....", ".....00023333332000.....", "........02333320........", "........011000110.......", "........0110.0110.......", ".........00...00........"],
-  NOCTURNEX: [".....020........020.....", ".....0220..00..0220.....", "......022001100220......", "......022211112220......", "......022200002220......", "..0....0200000020....0..", ".020....00222200....020.", ".0220...03322330...0220.", ".0222000331333130002220.", "032222202302230202222230", "033322222221122222223330", ".0333222223113222223330.", ".0333332233333322333330.", ".0333332233333322333330.", ".0333332233333322333330.", ".0333322233333322233330.", "..03322023333332022330..", "..03220023333332002230..", "...020..02333320..020...", "....0....023320....0....", "..........0000..........", ".........010010.........", ".........010010.........", "..........0..0.........."],
-  DRIZZLET: ["........................", "........................", "......0.................", ".....020................", "......020...00..........", "......0220.0220.........", "......022200220...0.....", ".......02330220..010....", "......03333330..0110....", ".....03333333300110.....", "....033333333331110000..", "....0333033333301102220.", "....03330333333000022220", ".....033333333300..00220", ".....0333111333330.00220", "......033333333333022220", ".......00333311333222220", "........033111111322200.", ".........031111113220...", "..........0331133000....", "...........000000.......", "........................", "........................", "........................"],
-  TIDEWYRM: [".020....0...............", "..020..020..............", "..0220.020..............", "..02220220..............", "..00233320..............", ".0333333330.............", ".0333033330.............", ".0333033330.............", ".0111333330.........0...", "..00333330..00.....020..", "....003330.0220...0220..", ".....0333300220..02220..", ".....0333300220.02220...", ".....0333302222033220...", "......033333303311320...", "......0331133311333330..", ".......033311113333330..", "........003331333033330.", "..........0003330333330.", "........0....0000333330.", ".......010000000333330..", "......011133333333330...", ".....011003333333330....", "......00.03333333330...."],
-  SKYLEVIATH: ["........020...0.........", ".0......0220.020......0.", "010......0220220.....010", "0110....03333320....0110", ".0110...03333330...0110.", ".01310..03303330..01310.", ".013310.03303330.013310.", ".0113310033333300133110.", "..01333100031330133310..", "..01333310033331333310..", "..01133330033303333110..", "..01133330033303333110..", "...013330.03130033310...", "...01030..03130.03010...", "....0.0...033130.0.0....", "..........033130........", "...........033130.......", "...........0333330......", "............033330......", "............0333330.....", "......0000000333330.....", ".....02233333333330.....", "....02222333333300......", ".....00033333330........"],
-  ZAPPIP: ["........................", ".........0....00........", "........010..0210.......", "........020..020........", ".........020020.........", ".........0200200........", "........022202220.......", "........0200.020........", "........020..020........", "........02000020........", "........03233320........", ".......0333333330.......", "......033333333330......", ".....03330333330330.....", ".....03330333330330.....", ".....03332222223330.....", ".....03322200022330.....", "......032222222230......", ".......0322222230.......", ".......0033333300.......", "......022002200220......", "......022002200220......", ".......00..00..00.......", "........................"],
-  VOLTWICK: ["........................", ".........0....00........", "........020..0220.......", "........020..020........", ".........020020.........", ".........020020.........", ".........032320.........", "........03333330........", "......000330303000......", "....0011133030311100....", "...011111333333111110...", "..01111111333311111110..", "..01111111222211111110..", "...011111222222111110...", "....0011122222211100....", "......000222222000......", "........03333330........", ".......0333333330.......", ".......0331111330.......", ".......0331111330.......", ".......0331111330.......", "........03333330........", ".........000000.........", "........................"],
-  THUNDRAKE: ["........................", "........................", "...........00...........", ".........003300.........", "........03333330........", "..00000003033300000000..", ".0111111130333011111110.", "011111111333333111111110", "011111111112211111111110", ".0111111112222111111110.", "..00000000222200000000..", ".0111111112222111111110.", "011111111122221111111110", "011111111112331111111110", ".0111111110033111111110.", "..00000000.01300000000..", "..........00330.........", ".........033330.........", ".........033330.........", ".........031330.........", "..........033330........", "..........033330........", "..........03330.........", "..........0330.........."],
-  LILMYST: ["........................", "........................", ".......00......00.......", "......0110....0110......", "......0110....0110......", ".......020....020.......", ".......0220..0220.......", "........02000020........", "........02333320........", "......000323332000......", ".....03333333333330.....", "....0333333333333330....", "...033333333333333330...", "...033333333333333330...", "....0333330333033330....", ".....03333033303330.....", ".....03313333333130.....", ".....03333333333330.....", "......033333333330......", ".......0333333330.......", "........00000000........", "........................", "........................", "........................"],
-  VIOLOOM: ["........0......00.......", ".......020....0220......", ".......0220..0220.......", "....0000020..0200000....", "..00222202200220222200..", ".0222222222002222222220.", ".0222222220232222222220.", "022222222233332222222220", "022211112233332211112220", "022211112230302211112220", "022211112230302211112220", "022211112333333211112220", "022222222333333222222220", ".0222222233333322222220.", ".0222222233333322222220.", "..00333333333333333300..", "..03333333333333333330..", "..03333333333333333330..", "..03333333333333333330..", "..03333333333333333330..", "...033333300003333330...", "....000000....000000....", "........................", "........................"],
-  AMETHORA: ["0.......020110220......0", "20......02000020......02", "220......020020......022", "2220.00..020020..00.0222", "22220110.032320.01102222", "22221110.03030..01112222", "22222110.03030..01122222", "222221220033330022122222", "022222222033330222222220", "022222222233332222222220", "022222222233332222222220", "022222222233332222222220", "022222200033330002222220", "022000000333333000000220", ".0003333333333333333000.", ".0333333333333333333330.", "..03311333333333311330..", "..03311330033003311330..", "...033333003300333330...", "...033330..00..033330...", "....03330......03330....", "....0330........0330....", ".....00..........00.....", "........................"],
-  // outbound duck lines
-  CINDUCK: ["........................", "........................", "........................", ".............0..........", "............010.........", "..........0010..........", ".......0001110..........", "......0331110...........", ".....03333330...........", "....0333033330......0...", "..001133033330.....010..", ".011111133333000..0110..", "..01111333333333001110..", "...0000333333333311110..", ".....0333332222333110...", ".....0333322222233110...", ".....0333322222233010...", ".....033332222223300....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  BLAZEDRAKE: ["............010.........", "...........0110.........", ".........001100.........", "......0001111010........", ".....0331111110.........", "....0333311110........0.", "...0333033310........010", ".000333033330.......0110", "0111111333330......01110", "0111113333300000..011110", ".00000333333333300111110", "......033333333333111110", "......03333222222331110.", ".....033332222222233110.", ".....033322222222223110.", ".....03333222222223310..", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  PHOENIDRAKE: ["..........001100..0.....", ".........01110010010...0", ".....00001111110.010..01", "....0331111111000110.011", "...033333111111111100111", "...033303331111011101111", "000033303331110111111110", "111111133333100111111110", "111111133333001111111111", "000003333330000111111111", ".....0033333333331111110", "......033332222223311110", ".....0333322222222331110", ".....033332222222223110.", ".....033322222222223110.", ".....033322222222223110.", ".....03333222222223310..", ".....0333332222223330...", "......03333333333330....", ".......003333333300.....", ".........010000010......", ".........010...010......", ".........010...010......", "........01110.01110....."],
-  BREEZLET: ["........................", "........................", "........................", "........................", "........................", "...................0....", ".......0000.......020...", "......033330.....0220...", ".....03333330...02220...", "....0333033330.022220...", "..0011330333300222220...", ".0111111333330222220....", "..011113333333332220....", "...00003333333333220....", ".....033333222233320....", ".....03333222222330.....", ".....03333222222330.....", ".....03333222222330.....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  GALEDRAKE: ["........................", "........................", "..................0...0.", "......0000.......030.020", ".....033330.....03300220", "....03333330....03302220", "...0333033330..03332220.", ".000333033330..03332220.", "0111111333330.033322220.", "01111133333000333322220.", ".0000033333333333322220.", "......0333333333332220..", "......0333322222233220..", ".....03333222222223320..", ".....0333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  STORMWING: ["0.....................02", "20...................022", "220..000000.........0222", "022003333330.......02320", "0232333333330.....023320", "0233333033330....0233320", "0023333033330...02333220", "1111111333330..023333220", "1111111333330.023333320.", "00233333333000233333320.", "..023333333333333333320.", "..023333333222222333320.", "..023333332222222233220.", "...0233333222222222320..", "...0233332222222222320..", "....00333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......003333333300.....", ".........010000010......", ".........010...010......", ".........010...010......", "........01110.01110....."],
-  MUSELET: ["........................", "........................", "........................", "........................", "........................", ".........0..............", ".......0010.............", "......033110............", ".....03333330...........", "....0333033330..........", "..001133033330..........", ".011111133333000........", "..011113333333330.......", "...000033333333330......", ".....03333322223330.....", ".....03333222222330.....", ".....03333222222330.....", ".....03333222222330.....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  MYSTDRAKE: ["........................", "........................", ".......00...............", "......0110........00....", ".....031130......0110...", "....03311330....011110..", "...0333033330...011110..", ".000333033330....0110...", "0111111333330.....0000..", "0111113333300000...0110.", ".00000333333333300.0110.", "......0333333333330.00..", "......03333222222330....", ".....0333322222222330...", ".....0333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  ASTRALDRAKE: ["........................", "....0..00..00...........", "...02001100220.....00...", "...0233113300.....0110..", "...0333333330....011110.", "...0333033330....011110.", "0000333033330.....0110..", "1111111333330......00...", "1111111333330...........", "00000333333000000....00.", ".....00333333333300.0110", "......033332222223300110", ".....033332222222233000.", "..00.0333322222222230...", ".01100333222222222230...", ".01100333222222222230...", "..00.0333322222222330...", ".....0333332222223330...", "......033333333333310...", ".......00333333330110...", ".........01000001000....", ".........010...010......", ".........010...010......", "........01110.01110....."],
-  SHADLET: ["........................", "........................", "........................", "..........0.............", ".........020............", ".........0220...........", ".......002220...........", "......033330............", ".....03333330...........", "....0322122220..........", "..001122022220..........", ".011111133333000........", "..011113333333330.......", "...000033333333330......", ".....03333322223330.....", ".....03333222222330.....", ".....03333222222330.....", ".....03333222222330.....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  NIGHTDRAKE: ["..........0.............", ".........0200...........", "........022020..........", "......00222220..........", ".....03333220...........", "....033333220...........", "...0322122220...........", ".000322022220...........", "0111111333330...........", "0111113333300000........", ".00000333333333300......", "......0333333333330.....", "......03333222222330....", ".....0333322222222330...", ".....0333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  ECLIPSDRAKE: ["........02200020........", ".......02220220.........", ".....0022222220.........", "....03333222220.......0.", "...02222222220.......020", "...02221222220.....00220", "00002220222220...0022220", "1111111333330...0222220.", "1111111333330..02222220.", "00000333333000022222220.", ".....003333333333222220.", "......033332222223322200", ".....0333322222222332222", ".....0333322222222232220", ".....033322222222123220.", ".....033322222222213220.", ".....03333222222213320..", ".....0333332222223330...", "......03333333333330....", ".......003333333300.....", ".........010000010......", ".........010...010......", ".........010...010......", "........01110.01110....."],
-  ZAPLING: ["........................", "..........00............", ".........0110...........", ".........010............", "..........0.............", ".........010............", ".......0000.............", "......033330............", ".....03333330......00...", "....0333033330....0110..", "..001133033330....010...", ".011111133333000.0100...", "..01111333333333001110..", "...000033333333330110...", ".....033333222233310....", ".....03333222222330.....", ".....03333222222330.....", ".....03333222222330.....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  AMPDRAKE: ["........010.............", "........010.............", "........0110............", "......00010.............", ".....033130.............", "....03333330........00..", "...0333033330......0110.", ".000333033330......010..", "0111111333330.....0110..", "0111113333300000..0100..", ".0000033333333330001110.", "......0333333333330110..", "......033332222223310...", ".....0333322222222330...", ".....0333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  TESLADRAKE: ["........010.........00..", ".......010.........0110.", ".....000110........0110.", "....03331330......0110..", "...0333333330.....01000.", "...0333033330.....011110", "0000333033330.....01110.", "1111111333330.....0110..", "1111111333330....0110...", "00000333333000000010....", ".....00333333333300..00.", "......033332222223300110", ".....033332222222233010.", ".....033332222222223000.", ".....0333222222222230110", ".....033322222222223010.", ".....03333222222223310..", ".....0333332222223330...", "......03333333333330....", ".......003333333300.....", ".........010000010......", ".........010...010......", ".........010...010......", "........01110.01110....."],
-};
 type CLine = { name: string; map: string[]; base: any; flavor: string }[];
-const mkLine = (names: string[], flavors: string[]): CLine => names.map((n, i) => ({ name: n, map: CREATURE_MAPS[n], base: SPECIES[i].base, flavor: flavors[i] }));
+// art ids follow the team sprite sheets: <Owner>_in_1..3 (inbound line), <Owner>_out_1..3 (outbound line)
+const mkLine = (names: string[], flavors: string[], art: string): CLine => names.map((n, i) => ({ name: n, map: ART(`${art}_${i + 1}`), base: SPECIES[i].base, flavor: flavors[i] }));
 const pal4 = (a: string[]) => ({ d0: a[0], d1: a[1], d2: a[2], d3: a[3] });
 const TRAINERS: Record<string, { cls: string; type: string; obType: string; color: string; line: CLine; obLine: CLine; inPal: any; obPal: any }> = {
   "89400804": { cls: "Team Red", type: "Fire", color: "#e8603c",
-    line: mkLine(["KINDLIT", "BLAZETAIL", "PYRALYNX"], ["Its tail flickers brighter every time a trial signs up.", "Turns a cold lead warm with a single follow-up.", "Leaves a trail of booked meetings wherever it hunts."]),
-    inPal: pal4(["#3a2020", "#ffb030", "#e8603c", "#ffe2c0"]), obType: "Fire", obLine: mkLine(["CINDUCK", "BLAZEDRAKE", "PHOENIDRAKE"], ["Waddles into cold accounts and warms them right up.", "Its first email lands like a spark in dry grass.", "Revives closed-lost accounts from the ashes."]),
+    line: mkLine(["KINDLIT", "BLAZETAIL", "PYRALYNX"], ["Its tail flickers brighter every time a trial signs up.", "Turns a cold lead warm with a single follow-up.", "Leaves a trail of booked meetings wherever it hunts."], "Rebecca_in"),
+    inPal: pal4(["#3a2020", "#ffb030", "#e8603c", "#ffe2c0"]), obType: "Fire", obLine: mkLine(["CINDUCK", "BLAZEDRAKE", "PHOENIDRAKE"], ["Waddles into cold accounts and warms them right up.", "Its first email lands like a spark in dry grass.", "Revives closed-lost accounts from the ashes."], "Rebecca_out"),
     obPal: pal4(["#3a2020", "#ffa424", "#d8503a", "#ffd6a0"]) },
   "95672339": { cls: "Team Silver", type: "Dark", color: "#7d8691",
-    line: mkLine(["HOOTLET", "DUSKOWL", "NOCTURNEX"], ["Sees every reply, even the ones sent at 2 a.m.", "Hunts silently through the inbox after dark.", "Team Silver's sharpest eyes. No lead escapes its gaze."]),
-    inPal: pal4(["#1e1f24", "#e6c34a", "#4a4e57", "#a8b0ba"]), obType: "Dark", obLine: mkLine(["SHADLET", "NIGHTDRAKE", "ECLIPSDRAKE"], ["Slips past gatekeepers unnoticed.", "Strikes from the shadows with a perfectly timed bump.", "Team Silver's outbound specialist. Its sequences never miss."]),
+    line: mkLine(["HOOTLET", "DUSKOWL", "NOCTURNEX"], ["Sees every reply, even the ones sent at 2 a.m.", "Hunts silently through the inbox after dark.", "Team Silver's sharpest eyes. No lead escapes its gaze."], "Lauren_in"),
+    inPal: pal4(["#1e1f24", "#e6c34a", "#4a4e57", "#a8b0ba"]), obType: "Dark", obLine: mkLine(["SHADLET", "NIGHTDRAKE", "ECLIPSDRAKE"], ["Slips past gatekeepers unnoticed.", "Strikes from the shadows with a perfectly timed bump.", "Team Silver's outbound specialist. Its sequences never miss."], "Lauren_out"),
     obPal: pal4(["#1a1b20", "#e6c34a", "#3c4048", "#9aa3ad"]) },
   "95288851": { cls: "Team Blue", type: "Water/Dragon", color: "#2f6fd6",
-    line: mkLine(["DRIZZLET", "TIDEWYRM", "SKYLEVIATH"], ["Splashes into new trials before anyone else notices.", "Its cadence rises and falls like the tide.", "Said to calm even the stormiest prospect."]),
-    inPal: pal4(["#14304f", "#f6efd6", "#2f6fd6", "#8fc4ff"]), obType: "Flying", obLine: mkLine(["BREEZLET", "GALEDRAKE", "STORMWING"], ["Scouts new accounts from high above.", "Rides the outbound winds from one territory to the next.", "Can multi-thread an entire org in a single flight."]),
+    line: mkLine(["DRIZZLET", "TIDEWYRM", "SKYLEVIATH"], ["Splashes into new trials before anyone else notices.", "Its cadence rises and falls like the tide.", "Said to calm even the stormiest prospect."], "Priscilla_in"),
+    inPal: pal4(["#14304f", "#f6efd6", "#2f6fd6", "#8fc4ff"]), obType: "Flying", obLine: mkLine(["BREEZLET", "GALEDRAKE", "STORMWING"], ["Scouts new accounts from high above.", "Rides the outbound winds from one territory to the next.", "Can multi-thread an entire org in a single flight."], "Priscilla_out"),
     obPal: pal4(["#14304f", "#ffc04a", "#4a86e8", "#e8f2ff"]) },
   "102299028": { cls: "Team Yellow", type: "Electric", color: "#e0b400",
-    line: mkLine(["ZAPPIP", "VOLTWICK", "THUNDRAKE"], ["Buzzes with first-quarter energy.", "Its glow lights up the darkest backlog.", "Strikes the same account twice: once by email, once by phone."]),
-    inPal: pal4(["#3a2e05", "#7ae7ff", "#f2a900", "#ffe14a"]), obType: "Electric", obLine: mkLine(["ZAPLING", "AMPDRAKE", "TESLADRAKE"], ["Fizzes with energy on every cold call.", "Its dials crackle with momentum.", "Powers through a full call block without slowing down."]),
+    line: mkLine(["ZAPPIP", "VOLTWICK", "THUNDRAKE"], ["Buzzes with first-quarter energy.", "Its glow lights up the darkest backlog.", "Strikes the same account twice: once by email, once by phone."], "Divya_in"),
+    inPal: pal4(["#3a2e05", "#7ae7ff", "#f2a900", "#ffe14a"]), obType: "Electric", obLine: mkLine(["ZAPLING", "AMPDRAKE", "TESLADRAKE"], ["Fizzes with energy on every cold call.", "Its dials crackle with momentum.", "Powers through a full call block without slowing down."], "Divya_out"),
     obPal: pal4(["#3a2e05", "#ff8a1f", "#f2a900", "#ffe14a"]) },
   "96069408": { cls: "Team Purple", type: "Psychic", color: "#8a55d0",
-    line: mkLine(["LILMYST", "VIOLOOM", "AMETHORA"], ["Senses a hand-raiser before the form is submitted.", "Its petals pick up hidden buying signals.", "Reads every account like a crystal ball."]),
-    inPal: pal4(["#2c1840", "#ffb8e6", "#7b4bc4", "#c8a6f2"]), obType: "Psychic", obLine: mkLine(["MUSELET", "MYSTDRAKE", "ASTRALDRAKE"], ["Somehow knows who will reply before they do.", "Its stare finds the champion in any org chart.", "Sees the whole buying committee at once."]),
+    line: mkLine(["LILMYST", "VIOLOOM", "AMETHORA"], ["Senses a hand-raiser before the form is submitted.", "Its petals pick up hidden buying signals.", "Reads every account like a crystal ball."], "Isabel_in"),
+    inPal: pal4(["#2c1840", "#ffb8e6", "#7b4bc4", "#c8a6f2"]), obType: "Psychic", obLine: mkLine(["MUSELET", "MYSTDRAKE", "ASTRALDRAKE"], ["Somehow knows who will reply before they do.", "Its stare finds the champion in any org chart.", "Sees the whole buying committee at once."], "Isabel_out"),
     obPal: pal4(["#2c1840", "#ff7ad0", "#7b4bc4", "#d8c2f6"]) },
 };
 const trainerOf = (bdr: string) => TRAINERS[bdr] ?? { cls: "BDR Trainer", type: "Normal", obType: "Normal", color: "#3878c8" };
@@ -1445,16 +1738,6 @@ const palOf = (bdr: string, ob: boolean, shiny: boolean) => {
   const t = TRAINERS[bdr];
   return t ? (ob ? t.obPal : t.inPal) : ob ? CREATURE_PALS.out : CREATURE_PALS.in;
 };
-// swap every creature to the team's sprite-sheet art (top row = inbound, bottom row = outbound)
-const ART_OWNER: Record<string, string> = { "89400804": "Rebecca", "95288851": "Priscilla", "95672339": "Lauren", "96069408": "Isabel", "102299028": "Divya" };
-Object.entries(ART_OWNER).forEach(([id, nm]) => {
-  const t = TRAINERS[id];
-  if (!t) return;
-  t.line.forEach((s, i) => { s.map = ART(`${nm}_in_${i + 1}`); });
-  t.obLine.forEach((s, i) => { s.map = ART(`${nm}_out_${i + 1}`); });
-});
-SPECIES.forEach((s: any, i: number) => { s.map = ART(`Default_in_${i + 1}`); });
-OB_SPECIES.forEach((s: any, i: number) => { s.map = ART(`Default_out_${i + 1}`); });
 
 function obGameSql(bdr: string, qs: string, qe: string) {
   return `WITH params AS (SELECT '${bdr}' AS bdr, DATE '${qs}' AS qs, DATE '${qe}' AS qe),
@@ -1565,34 +1848,26 @@ function TrainerTab({ defaultTrainer }: { defaultTrainer: string }) {
   const tr = trainerOf(tid);
   return (
     <div style={{ fontFamily: UI.body }}>
-      <div style={{ ...PANEL(), display: "flex", alignItems: "center", gap: 14, padding: "10px 16px", marginBottom: 12, borderLeft: `6px solid ${tr.color}` }}>
-        <Sprite map={lineFor(tid, false)[0].map} pal={palOf(tid, false, false)} scale={3} />
-        <Sprite map={lineFor(tid, true)[0].map} pal={palOf(tid, true, false)} scale={3} />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: fs(11), color: C.muted, textTransform: "uppercase", letterSpacing: 1 }}>{tr.cls}</div>
-          <div style={{ fontSize: fs(19), fontWeight: 700 }}>{bdrName(tid)}</div>
-          <div style={{ fontSize: fs(11), color: C.muted }}>Inbound: {tr.type} · {lineFor(tid, false).map((s) => s.name).join(" → ")}</div>
-          <div style={{ fontSize: fs(11), color: C.muted }}>Outbound: {tr.obType} · {lineFor(tid, true).map((s) => s.name).join(" → ")}</div>
+      <div style={{ ...PANEL(), display: "flex", alignItems: "center", gap: SP.lg, padding: `${SP.md}px ${SP.lg}px`, marginBottom: SP.lg, borderLeft: `6px solid ${tr.color}`, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: SP.sm, alignItems: "flex-end" }}>
+          <Sprite map={lineFor(tid, false)[0].map} pal={palOf(tid, false, false)} h={56} fit="box" />
+          <Sprite map={lineFor(tid, true)[0].map} pal={palOf(tid, true, false)} h={56} fit="box" />
+        </div>
+        <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+          <div style={{ fontSize: fs(11.5), color: UI.game ? shade(tr.color, 0.2) : C.muted, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{tr.cls}</div>
+          <div style={{ fontSize: fs(21), fontWeight: 800, lineHeight: 1.25 }}>{bdrName(tid)}</div>
+          <div style={{ fontSize: fs(12.5), color: C.muted, marginTop: SP.xs }}>Inbound: {tr.type} · {lineFor(tid, false).map((s) => s.name).join(" → ")}</div>
+          <div style={{ fontSize: fs(12.5), color: C.muted }}>Outbound: {tr.obType} · {lineFor(tid, true).map((s) => s.name).join(" → ")}</div>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(10.5), color: C.faint }}>
-          Trainer
-          <select value={tid} onChange={(e) => setTrainer(e.target.value)} style={{ ...ctl, cursor: "pointer", color: C.accent }}>
-            {BDRS.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        </label>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(10.5), color: C.faint }}>
-          Quarter
-          <select value={qtr.id} onChange={(e) => setQid(e.target.value)} style={{ ...ctl, cursor: "pointer" }}>
-            {QUARTERS.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
-          </select>
-        </label>
-        <span style={{ fontSize: fs(10.5), color: C.faint }}>
+      <div style={{ display: "flex", gap: SP.sm, alignItems: "center", marginBottom: SP.lg, flexWrap: "wrap" }}>
+        <Dropdown label="Trainer" options={BDRS.map(bdrOpt)} value={tid} onChange={setTrainer} isDefault menuWidth={260} />
+        <Dropdown label="Quarter" options={QUARTERS.map((q) => ({ v: q.id, label: q.label }))} value={qtr.id} onChange={setQid} isDefault menuWidth={200} />
+        <span style={{ fontSize: fs(12), color: C.faint }}>
           Total quota {totalQuota}{quotaRow ? "" : " (default)"} = inbound {Math.max(0, totalQuota - obTarget)} + outbound {obTarget}{quotaRow?.ob_sqa_target == null ? " (default split)" : ""} · &gt;100% unlocks at {obTarget} outbound · BDR Terminal SQA rules
         </span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(440px, 1fr))", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 440px), 1fr))", gap: SP.lg }}>
         <CreaturePanel tid={tid} qtr={qtr} ob={false} quota={Math.max(1, totalQuota - obTarget)} />
         <CreaturePanel tid={tid} qtr={qtr} ob quota={Math.max(1, obTarget)} />
       </div>
@@ -1638,7 +1913,7 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
   const nextMove = MV.find((m) => m.lv > lv);
   const nextEvo = stage === 0 ? t1 : stage === 1 ? t2 : quota;
   const loading = g.isLoading;
-  const px: any = { fontFamily: UI.body, textTransform: "uppercase", letterSpacing: 0.5 };
+  const px: any = { fontFamily: UI.body, textTransform: "uppercase", letterSpacing: 0.5, minWidth: 0 };
 
   return (
     <div style={px}>
@@ -1646,13 +1921,13 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
         {ob ? "◎ OUTBOUND" : "◓ INBOUND"} · target {quota} SQAs <span style={{ color: C.faint }}>· {ob ? "Apollo contacts + Outbound-source deals" : "everything except Apollo contacts + Outbound-source deals"}</span>
       </div>
       {g.isError ? <div style={{ color: C.danger, fontSize: fs(12), textTransform: "none" }}>{String(g.error)}</div> : (
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: SP.md }}>
         <GbBox style={{ minHeight: 330, position: "relative" }}>
-          {loading ? <div style={{ height: 300 }} className="animate-pulse" /> : (<>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", ...(UI.game ? BATTLE_BG : {}) }}>
-              <div style={{ width: "55%", ...(UI.game ? NAMEPLATE : {}) }}>
-                <div style={{ fontSize: UI.game ? fs(17) : 15, fontWeight: 700, fontFamily: UI.pixel }}>{sp.name}{shiny ? " ✦" : ""}</div>
-                <div style={{ fontSize: fs(12), margin: "2px 0 6px" }}>:L{lv}</div>
+          {loading ? <LoadingMon bdr={tid} ob={ob} label="Who's that creature? Counting up EXP" rows={3} rowH={72} /> : (<>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "stretch", flexWrap: "wrap", gap: SP.md, ...(UI.game ? BATTLE_BG : {}) }}>
+              <div style={{ flex: "1 1 230px", minWidth: 0, alignSelf: "flex-start", ...(UI.game ? NAMEPLATE : {}) }}>
+                <div style={{ fontSize: UI.game ? undefined : 15, fontWeight: 700 }}>{UI.game ? <PixelText text={`${sp.name}${shiny ? " ✦" : ""}`} px={fs(17)} color="#303030" /> : `${sp.name}${shiny ? " ✦" : ""}`}</div>
+                <div style={{ margin: `${SP.xs}px 0 ${SP.sm}px` }}><LvBadge lv={lv} px={12} /></div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(10) }}>
                   <b style={UI.game ? { background: "#e8b830", padding: "0 5px", borderRadius: 3, border: "1px solid #484848" } : {}}>SQA</b><div style={{ flex: 1 }}><Bar pct={(sqas / quota) * 100} color={sqas / quota >= 0.66 ? (UI.game ? "#48c050" : GB.d1) : sqas / quota >= 0.33 ? (UI.game ? "#f0c030" : "#c8a000") : (UI.game ? "#f05030" : "#b03a2e")} bg={UI.game ? "#f2f2f2" : GB.d2} /></div>
                 </div>
@@ -1662,16 +1937,16 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
                 </div>
                 <div style={{ fontSize: fs(9.5), textAlign: "right", marginTop: 2 }}>{Math.round(lvNext - xp).toLocaleString()} TO :L{lv + 1}</div>
               </div>
-              <div style={UI.game ? STAGE(shiny) : { background: pal === SHINY ? "#fff4cf" : GB.d3, borderRadius: UI.radius2, padding: 4 }}>
-                <Sprite map={sp.map} pal={pal} scale={8} flip />
+              <div style={{ flex: "1 1 170px", minWidth: 0, display: "flex", alignItems: "flex-end", minHeight: 140 }}>
+                <SpriteFill map={sp.map} pal={pal} maxH={200} minH={96} pad={UI.game ? STAGE(shiny) : { background: pal === SHINY ? "#fff4cf" : GB.d3, borderRadius: UI.radius2, padding: 4 }} />
               </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: SP.md, flexWrap: "wrap" }}>
               {LINE.map((s, i) => (
                 <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <div style={{ opacity: i <= stage ? 1 : 0.35, textAlign: "center" }}>
-                    <Sprite map={s.map} pal={palOf(tid, ob, i === 2 && shiny)} scale={2.5} />
+                    <Sprite map={s.map} pal={palOf(tid, ob, i === 2 && shiny)} h={56} fit="line" />
                     <div style={{ fontSize: fs(8.5) }}>{i === 0 ? "0" : i === 1 ? t1 : t2} SQA</div>
                   </div>
                   {i < 2 && <span style={{ fontSize: fs(12) }}>▶</span>}
@@ -1693,7 +1968,7 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
 
         {UI.game && !loading && <TodayLedger x={x} ob={ob} />}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))", gap: SP.md }}>
           <GbBox>
             <div style={{ fontSize: fs(11), fontWeight: 800, marginBottom: 6 }}>STATS</div>
             {stats.map((s) => (
@@ -1747,6 +2022,8 @@ function useTrainingXp(bdr: string, ob: boolean, qtr: { start: string; end: stri
   const r: any = (Array.isArray(g.data) ? g.data[0] : null) ?? {};
   const base = xpOf(r, ob);
   const [pend, setPend] = useState<{ kind: XpKind; xp: number; t: number }[]>([]);
+  const pendRef = useRef(pend); pendRef.current = pend;
+  const baseRef = useRef(base); baseRef.current = base;
   const seenToday = useRef(base.todayXp);
   const refetch = useRef(g.refetch);
   refetch.current = g.refetch;
@@ -1758,10 +2035,22 @@ function useTrainingXp(bdr: string, ob: boolean, qtr: { start: string; end: stri
     setPend((p) => p.filter((it) => { if (gained >= it.xp) { gained -= it.xp; return false; } return true; }));
   }, [base.todayXp]);
   useEffect(() => {
+    // Every queued action lands here. Work out the real gain (daily caps apply), credit it, then tell the
+    // creatures what happened ("bdr-fx") so their reaction shows the same number the ledger will count.
     const onGain = (e: any) => {
       const d = e.detail || {};
-      if (d.bdr !== bdr || !!d.ob !== ob) return;
-      setPend((p) => [...p, { kind: d.kind, xp: d.xp, t: Date.now() }]);
+      if (d.bdr !== bdr || (d.ob !== undefined && !!d.ob !== ob)) return;
+      let xp = 0, capped = false;
+      if (d.kind && d.xp > 0) {
+        const cap = XP_CAP[d.kind as XpKind];
+        const used = N((baseRef.current.todayCounts as any)[d.kind]) + pendRef.current.filter((p) => p.kind === d.kind).length;
+        if (cap != null && used >= cap) capped = true; else xp = d.xp;
+      }
+      const cur = baseRef.current.xp + pendRef.current.reduce((a, p) => a + p.xp, 0);
+      if (xp > 0) { const item = { kind: d.kind as XpKind, xp, t: Date.now() }; pendRef.current = [...pendRef.current, item]; setPend((p) => [...p, item]); }
+      const detail = { bdr, ob, t: d.t, kind: d.kind ?? null, xp, capped, lvBefore: levelOf(cur), lvAfter: levelOf(cur + xp), id: Date.now() + Math.random(), at: Date.now() };
+      lastFx = detail;
+      window.dispatchEvent(new CustomEvent("bdr-fx", { detail }));
     };
     const timers: any[] = [];
     const onSaved = (e: any) => {
@@ -1861,6 +2150,127 @@ function TodayLedger({ x, ob }: { x: XpInfo; ob: boolean }) {
   );
 }
 
+// ---- Task feedback: the creature "does" the task ----
+// useTrainingXp turns each queued action into a "bdr-fx" event with the real EXP (caps applied). These small
+// components listen for it, so only they re-render. Animations are CSS-only, <= 1.2s, and off for reduced motion.
+type FxMove = { move: string; anim: "hop" | "dash" | "wiggle" | "carry"; tail: string };
+const FX_MOVES: Record<string, FxMove> = {
+  reviewed: { move: "REVIEW", anim: "hop", tail: "The queue looks tidier." },
+  retouch_set: { move: "RETOUCH", anim: "wiggle", tail: "It'll circle back on schedule." },
+  retouch_clear: { move: "CLEAR", anim: "hop", tail: "Retouch cleared." },
+  note: { move: "TAKE NOTE", anim: "hop", tail: "Noted for later." },
+  linkedin_request_sent: { move: "CONNECT", anim: "dash", tail: "Request logged." },
+  linkedin_accepted: { move: "HANDSHAKE", anim: "hop", tail: "They accepted!" },
+  linkedin_message: { move: "DIRECT MESSAGE", anim: "dash", tail: "Message logged." },
+  linkedin_reply: { move: "REPLY CATCH", anim: "hop", tail: "They wrote back!" },
+  ae_assign: { move: "HANDOFF", anim: "dash", tail: "The AE has the account." },
+  gmail_open: { move: "DELIVER", anim: "carry", tail: "Draft carried to Gmail. Email EXP arrives once it's sent and syncs." },
+};
+const FX_ANIM: Record<FxMove["anim"], string> = { hop: "bdrHopOnce .7s ease-out", dash: "bdrDash .6s ease-out", wiggle: "bdrWiggle .45s ease-in-out 2", carry: "bdrHopOnce .7s ease-out" };
+const KIND_LABEL: Record<string, string> = { linkedin: "LinkedIn", queue: "queue hygiene" };
+// current creature form per BDR (published by the header showcase once EXP loads)
+type MonForm = { name: string; map: string[]; pal: any };
+const monForms: Record<string, MonForm> = {};
+const formKey = (bdr: string, ob: boolean) => `${bdr}:${ob ? 1 : 0}`;
+function useMonForm(bdr: string, ob: boolean): MonForm {
+  const k = formKey(bdr, ob);
+  const [f, setF] = useState<MonForm | null>(monForms[k] ?? null);
+  useEffect(() => {
+    setF(monForms[k] ?? null);
+    const on = (e: any) => { if (e.detail?.k === k) setF(e.detail.form); };
+    window.addEventListener("bdr-form", on);
+    return () => window.removeEventListener("bdr-form", on);
+  }, [k]);
+  const first = lineFor(bdr, ob)[0];
+  return f ?? { name: first.name, map: first.map, pal: palOf(bdr, ob, false) };
+}
+// Most recent reaction. Acting on a contact often moves the list on (it leaves the bucket), so the card creature
+// re-mounts right after the click; it picks this up and still plays the reaction.
+let lastFx: any = null;
+function useFx(bdr: string, ob: boolean, ms: number) {
+  const fresh = () => (lastFx && lastFx.bdr === bdr && !!lastFx.ob === ob && Date.now() - lastFx.at < Math.min(ms, 600) ? lastFx : null);
+  const [fx, setFx] = useState<any>(fresh);
+  useEffect(() => {
+    let t: any;
+    const show = (d: any) => {
+      setFx(d);
+      clearTimeout(t);
+      t = setTimeout(() => setFx((cur: any) => (cur?.id === d.id ? null : cur)), Math.max(0, ms - (Date.now() - d.at)));
+    };
+    const f = fresh();
+    if (f) show(f);
+    const on = (e: any) => { const d = e.detail || {}; if (d.bdr === bdr && !!d.ob === ob) show(d); };
+    window.addEventListener("bdr-fx", on);
+    return () => { window.removeEventListener("bdr-fx", on); clearTimeout(t); };
+  }, [bdr, ob, ms]);
+  return fx;
+}
+// The creature that acts: hops / dashes / wiggles / carries an envelope, sparkles, and pops the EXP it earned
+function MonReactor({ bdr, ob, h = 56 }: { bdr: string; ob: boolean; h?: number }) {
+  const form = useMonForm(bdr, ob);
+  const fx = useFx(bdr, ob, 1200);
+  const mv: FxMove | null = fx ? FX_MOVES[fx.t] ?? { move: "ACT", anim: "hop", tail: "" } : null;
+  const still = reducedMotion();
+  return (
+    <div className="bdr-fx" title={form.name} style={{ position: "relative", display: "inline-block", lineHeight: 0 }}>
+      <div key={fx?.id ?? "idle"} style={{ animation: mv && !still ? FX_ANIM[mv.anim] : undefined }}><Sprite map={form.map} pal={form.pal} h={h} fit="box" /></div>
+      {fx && mv && mv.anim !== "carry" && !still && [[-6, 6], [h - 6, 2], [h / 2, -10]].map(([x, y], i) => (
+        <span key={`${fx.id}-${i}`} aria-hidden="true" style={{ position: "absolute", left: x, top: y, fontSize: 12, color: "#f5b82e", animation: `bdrSpark .8s ease-out ${i * 0.08}s both`, pointerEvents: "none", lineHeight: 1 }}>✦</span>
+      ))}
+      {fx && mv?.anim === "carry" && (
+        <span aria-hidden="true" style={{ position: "absolute", left: "50%", top: -14, animation: still ? undefined : "bdrCarry 1.1s ease-in-out both", pointerEvents: "none", lineHeight: 0 }}>
+          <Mail size={18} color="#d04848" fill="#fff" />
+        </span>
+      )}
+      {fx && (fx.xp > 0 || fx.capped) && (
+        <span aria-hidden="true" style={{ position: "absolute", left: "50%", top: -8, transform: "translateX(-50%)", animation: still ? undefined : "bdrRise 1.1s ease-out both", pointerEvents: "none", lineHeight: 0,
+          filter: "drop-shadow(1px 1px 0 #fff) drop-shadow(-1px -1px 0 #fff)", whiteSpace: "nowrap" }}>
+          <PixelText text={fx.xp > 0 ? `+${fx.xp} EXP` : "CAP"} px={12} color={fx.xp > 0 ? "#2f8a40" : "#8b949e"} />
+        </span>
+      )}
+    </div>
+  );
+}
+// Dialog line: shows "<CREATURE> used <MOVE>!" after an action, then goes back to the normal prompt
+function FxPrompt({ bdr, ob, children }: { bdr: string; ob: boolean; children: any }) {
+  const form = useMonForm(bdr, ob);
+  const fx = useFx(bdr, ob, 2200); // text stays a little longer than the 1.2s motion so it can be read
+  if (!fx) return children;
+  const mv = FX_MOVES[fx.t] ?? { move: "ACT", anim: "hop", tail: "" };
+  const second = fx.xp > 0 ? `+${fx.xp} EXP. ${mv.tail}` : fx.capped ? `Daily ${KIND_LABEL[fx.kind] ?? fx.kind} cap reached, so no EXP this time. Still logged.` : mv.tail;
+  return (
+    <span key={fx.id} role="status" className="bdr-fx" style={{ display: "block", animation: reducedMotion() ? undefined : "bdrLine 2.2s ease-out both" }}>
+      <b>{form.name}</b> used <b>{mv.move}</b>!
+      {second && <span style={{ display: "block", fontSize: "0.9em", color: "#555" }}>{second}</span>}
+    </span>
+  );
+}
+// Level-up / evolution / shiny banner. Not modal: click it or press Esc to skip; it leaves on its own after ~2.6s.
+function Celebration({ c, onDone }: { c: { id: number; title: string; text: string; map: string[]; pal: any } | null; onDone: () => void }) {
+  useEffect(() => {
+    if (!c) return;
+    const t = setTimeout(onDone, 2600);
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") onDone(); };
+    window.addEventListener("keydown", k);
+    return () => { clearTimeout(t); window.removeEventListener("keydown", k); };
+  }, [c?.id]);
+  if (!c) return null;
+  const still = reducedMotion();
+  return (
+    <div key={c.id} role="status" aria-live="polite" onClick={onDone} className="bdr-fx" title="Click to skip"
+      style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", zIndex: 80, cursor: "pointer", display: "flex", alignItems: "center", gap: SP.lg,
+        background: "#ffffff", border: "3px solid #484848", boxShadow: "inset 0 0 0 2px #e8d18a, 0 12px 32px rgba(0,0,0,.25)", borderRadius: 12, padding: `${SP.md}px ${SP.xl}px ${SP.md}px ${SP.md}px`,
+        maxWidth: "calc(100vw - 32px)", animation: still ? undefined : "bdrBanner 2.6s ease-out both" }}>
+      <div style={{ ...STAGE(true), padding: "2px 12px 16px", lineHeight: 0, animation: still ? undefined : "bdrGlow .9s ease-in-out 2" }}><Sprite map={c.map} pal={c.pal} h={88} fit="box" /></div>
+      <div style={{ minWidth: 0 }}>
+        <PixelText text={c.title} px={21} color="#d04848" shadow="#f3d27a" />
+        <div style={{ fontFamily: FONT_GAME, fontSize: fs(14), color: "#303030", marginTop: SP.sm }}>{c.text}</div>
+        <div style={{ fontSize: fs(11), color: "#888", marginTop: SP.xs }}>Click or press Esc to skip</div>
+      </div>
+    </div>
+  );
+}
+
 // One creature in the header: sprite on its grass pad, level, EXP bar, today's gains
 function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: any; quota: number }) {
   const { g, r, x } = useTrainingXp(bdr, ob, qtr);
@@ -1870,11 +2280,14 @@ function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: 
   const stage = sqas >= t2 ? 2 : sqas >= t1 ? 1 : 0;
   const shiny = sqas >= q;
   const sp = lineFor(bdr, ob)[stage];
-  // "+EXP" pop-ups and a LEVEL UP flash when XP rises during the session
+  // "+EXP" pop-ups when XP rises during the session; a skippable banner for level-ups, evolutions and shiny
   const [floats, setFloats] = useState<{ id: number; amt: number; color: string }[]>([]);
   const [flash, setFlash] = useState(false);
+  const [cele, setCele] = useState<any>(null);
   const prev = useRef<XpInfo | null>(null);
+  const prevForm = useRef<{ stage: number; shiny: boolean } | null>(null);
   const loaded = Array.isArray(g.data);
+  const fx = useFx(bdr, ob, 800); // the header creature hops along with the card creature
   useEffect(() => {
     if (!loaded) return; // first load is not a "gain"
     const p = prev.current;
@@ -1885,29 +2298,49 @@ function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: 
     const id = Date.now() + Math.random();
     const color = XP_KINDS.find((m) => m.k === best)!.color;
     setFloats((f) => [...f, { id, amt: Math.round(x.xp - p.xp), color }]);
-    setTimeout(() => setFloats((f) => f.filter((z) => z.id !== id)), 1700);
-    if (x.lv > p.lv) { setFlash(true); setTimeout(() => setFlash(false), 2600); }
+    setTimeout(() => setFloats((f) => f.filter((z) => z.id !== id)), 1200);
+    if (x.lv > p.lv) {
+      setFlash(true); setTimeout(() => setFlash(false), 1200);
+      setCele({ id, title: "LEVEL UP!", text: `${sp.name} grew to Lv ${x.lv}!`, map: sp.map, pal: palOf(bdr, ob, shiny) });
+    }
   }, [x.xp, loaded]);
+  // evolution / shiny happen when SQAs arrive from HubSpot (data refresh), never from a click
+  useEffect(() => {
+    if (!loaded) return;
+    const p = prevForm.current;
+    prevForm.current = { stage, shiny };
+    if (!p) return;
+    if (stage > p.stage) setCele({ id: Date.now(), title: "EVOLUTION!", text: `${lineFor(bdr, ob)[p.stage].name} evolved into ${sp.name}!`, map: sp.map, pal: palOf(bdr, ob, shiny) });
+    else if (shiny && !p.shiny) setCele({ id: Date.now(), title: "SHINY!", text: `${sp.name} is shining: quota reached!`, map: sp.map, pal: palOf(bdr, ob, true) });
+  }, [stage, shiny, loaded]);
+  // publish the current form so the card creature and dialog lines use the same creature
+  useEffect(() => {
+    if (!loaded) return;
+    const form = { name: sp.name, map: sp.map, pal: palOf(bdr, ob, shiny) };
+    monForms[formKey(bdr, ob)] = form;
+    window.dispatchEvent(new CustomEvent("bdr-form", { detail: { k: formKey(bdr, ob), form } }));
+  }, [sp.name, shiny, loaded, bdr, ob]);
   const lvUpsToday = x.lv - x.lvStart;
   return (
     <div style={{ ...PANEL(), flex: "1 1 330px", minWidth: 0, display: "flex", alignItems: "center", gap: 10, padding: "6px 14px 6px 6px", position: "relative" }}>
-      <div style={{ ...STAGE(shiny), padding: "2px 12px 16px", lineHeight: 0, position: "relative", animation: flash ? "bdrPop .5s steps(4) 3" : undefined }}>
-        {loaded ? <Sprite map={sp.map} pal={palOf(bdr, ob, shiny)} scale={4.4} flip />
-          : <div title="Loading your EXP…" style={{ filter: "brightness(0)", opacity: 0.18 }}><Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} scale={4.4} flip /></div>}
+      <Celebration c={cele} onDone={() => setCele(null)} />
+      <div className="bdr-fx" style={{ ...STAGE(shiny), padding: "2px 12px 16px", lineHeight: 0, position: "relative", animation: flash ? "bdrPop .4s steps(4) 3" : undefined }}>
+        {loaded ? <div key={fx?.id ?? "idle"} style={{ animation: fx && !reducedMotion() ? "bdrHopOnce .7s ease-out" : undefined }}><Sprite map={sp.map} pal={palOf(bdr, ob, shiny)} h={96} /></div>
+          : <div title="Loading your EXP…" style={{ filter: "brightness(0)", opacity: 0.18 }}><Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} h={96} /></div>}
         {floats.map((f) => (
           <span key={f.id} style={{ position: "absolute", left: "50%", top: 4, transform: "translateX(-50%)", fontSize: fs(13), fontWeight: 700, color: f.color, whiteSpace: "nowrap",
-            textShadow: "1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff", animation: "bdrFloat 1.6s ease-out forwards", pointerEvents: "none", lineHeight: 1 }}>+{f.amt} EXP</span>
+            animation: reducedMotion() ? undefined : "bdrFloat 1.2s ease-out forwards", pointerEvents: "none", lineHeight: 0, filter: "drop-shadow(1px 1px 0 #fff) drop-shadow(-1px -1px 0 #fff)" }}><PixelText text={`+${f.amt} EXP`} px={fs(12)} color={f.color} /></span>
         ))}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6 }}>
           <span style={{ fontSize: fs(9.5), letterSpacing: 1, color: C.accent }}>{ob ? "◎ OUTBOUND" : "◓ INBOUND"}</span>
-          {flash ? <span style={{ fontSize: fs(11), fontWeight: 700, color: "#d84040", animation: "bdrBlink .4s steps(1) infinite" }}>LEVEL UP!</span>
+          {flash ? <PixelText text="LEVEL UP!" px={11} color="#d84040" />
             : lvUpsToday > 0 ? <span style={{ fontSize: fs(9.5), fontWeight: 700, color: "#3a9a4a" }}>▲ {lvUpsToday} LV TODAY</span> : null}
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "1px 0 4px" }}>
-          <b style={{ fontSize: fs(15), color: loaded ? "#303030" : C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{loaded ? `${sp.name}${shiny ? " ✦" : ""}` : "???"}</b>
-          <span style={{ fontSize: fs(12), color: loaded ? "#303030" : C.faint }}>:L{loaded ? x.lv : "??"}</span>
+          <span style={{ overflow: "hidden", minWidth: 0 }}><PixelText text={loaded ? `${sp.name}${shiny ? " ✦" : ""}` : "???"} px={fs(15)} color={loaded ? "#303030" : C.faint} /></span>
+          <LvBadge lv={loaded ? x.lv : "??"} px={11} color={loaded ? "#303030" : C.faint} />
           <span style={{ fontSize: fs(9.5), color: C.faint, marginLeft: "auto", whiteSpace: "nowrap" }}>{loaded ? `${sqas}/${q} SQA` : "??/?? SQA"}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1994,16 +2427,17 @@ function useLeagueRow({ b, qtr, quotas, onData }: { b: { id: string; name: strin
 }
 
 // One creature, centered on its grass pad, with level + today's XP under it
-function LeagueMon({ s, ob, bdr, scale = 4.6, showToday = true }: { s: Summ | null; ob: boolean; bdr: string; scale?: number; showToday?: boolean }) {
-  const box = Math.round(scale * 16);
+// h = sprite slot height; integer-scaled so the art stays crisp (96 -> 1x, 192 -> 2x)
+function LeagueMon({ s, ob, bdr, h = 96, showToday = true }: { s: Summ | null; ob: boolean; bdr: string; h?: number; showToday?: boolean }) {
+  const box = h;
   if (!s) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }}>
         <div style={{ ...STAGE(false), padding: "2px 14px 18px", lineHeight: 0, filter: "brightness(0)", opacity: 0.16 }}>
-          <Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} scale={scale} />
+          <Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} h={h} />
         </div>
-        <div style={{ fontSize: fs(10.5), fontWeight: 700, color: C.faint }}>???</div>
-        <div style={{ fontSize: fs(9.5), color: C.faint }}>:L?? · ??/?? SQA</div>
+        <PixelText text="???" px={12} color={C.faint} />
+        <div style={{ fontSize: fs(11), color: C.faint }}>Lv ?? · ??/?? SQA</div>
       </div>
     );
   }
@@ -2012,10 +2446,10 @@ function LeagueMon({ s, ob, bdr, scale = 4.6, showToday = true }: { s: Summ | nu
     <div title={`${sp.name} Lv ${s.lv}${s.shiny ? " ✦ shiny" : ""}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0, width: "100%" }}>
       <div style={{ fontSize: fs(9), letterSpacing: 1, color: C.accent }}>{ob ? "◎ OUTBOUND" : "◓ INBOUND"}</div>
       <div style={{ ...STAGE(s.shiny), padding: "2px 14px 18px", lineHeight: 0, minHeight: box, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-        <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} scale={scale} />
+        <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} h={h} />
       </div>
-      <div style={{ fontSize: fs(11), fontWeight: 700, color: "#303030", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sp.name}{s.shiny ? " ✦" : ""}</div>
-      <div style={{ fontSize: fs(9.5), color: C.muted }}>:L{s.lv} · {s.sqas}/{s.quota} SQA</div>
+      <div style={{ maxWidth: "100%", overflow: "hidden", lineHeight: 0, marginTop: 2 }}>{UI.game ? <PixelText text={`${sp.name}${s.shiny ? " ✦" : ""}`} px={12} color="#303030" /> : <b style={{ fontSize: fs(11), lineHeight: 1.4 }}>{sp.name}</b>}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(11), color: C.muted }}><LvBadge lv={s.lv} px={9} color="#4f5762" /> · {s.sqas}/{s.quota} SQA</div>
       {showToday && (
         <div style={{ width: "100%", maxWidth: 170, marginTop: 3 }}>
           <ExpBar x={s.x} h={8} />
@@ -2107,7 +2541,7 @@ function HofCard({ bdr, qtr, quotas }: { bdr: string; qtr: any; quotas: any[] })
   const total = (si?.sqas ?? 0) + (so?.sqas ?? 0);
   const cleared = !!si && !!so && total >= qf.total;
   const over = cleared && so!.sqas >= qf.ob && total > qf.total;
-  const Mon = ({ s, ob }: { s: Summ | null; ob: boolean }) => <LeagueMon s={s} ob={ob} bdr={bdr} scale={5} showToday={live} />;
+  const Mon = ({ s, ob }: { s: Summ | null; ob: boolean }) => <LeagueMon s={s} ob={ob} bdr={bdr} h={192} showToday={live} />;
   return (
     <GbBox style={{ opacity: gi.isError || go.isError ? 0.6 : 1, borderTop: `6px solid ${trainerOf(bdr).color}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11), fontWeight: 800, marginBottom: 6 }}>
@@ -2151,9 +2585,9 @@ function LeagueTab() {
           ))}
         </div>
         {view === "board" ? (
-          <Select label="Quarter" value={qtr.id} onChange={(v) => { setQid(v); setResults({}); }} options={QUARTERS.map((q) => [q.id, q.label] as [string, string])} />
+          <Dropdown label="Quarter" isDefault menuWidth={200} value={qtr.id} onChange={(v) => { setQid(v); setResults({}); }} options={QUARTERS.map((q) => ({ v: q.id, label: q.label }))} />
         ) : (
-          <Select label="Trainer" value={hofId} onChange={setHofBdr} options={BDRS.map((b) => [b.id, b.name] as [string, string])} />
+          <Dropdown label="Trainer" options={BDRS.map(bdrOpt)} value={hofId} onChange={setHofBdr} isDefault menuWidth={260} />
         )}
       </div>
 
@@ -2356,60 +2790,188 @@ function FlagLine({ flags }: { flags: string[] }) {
 }
 
 // ---- Action queue: clicks are instant (optimistic); events are batched into one Flight run ----
-type QEvt = { event_id: string; event_type: string; contact_id?: string; company_id?: string; ae_id?: string; retouch_days?: string; note?: string };
+// Reliability: unsaved events are kept in this browser (localStorage) so a reload resends them; a failed or
+// silent run is requeued and retried with backoff. Resending is safe: the Flight does INSERT OR IGNORE on event_id.
+type QEvt = { event_id: string; event_type: string; contact_id?: string; company_id?: string; ae_id?: string; retouch_days?: string; note?: string; by?: string };
+const RUN_START_TIMEOUT = 20000;   // no run number back from the Flight API by then -> retry
+const RUN_FINISH_TIMEOUT = 180000; // run never reported finished (e.g. status checks failing) -> retry
+const MAX_AUTO_RETRIES = 5;
+const errText = (e: any) => String(e?.message ?? e ?? "unknown error").slice(0, 120);
+const lsGet = (k: string): QEvt[] => { try { const v = JSON.parse(localStorage.getItem(k) || "[]"); return Array.isArray(v) ? v.filter((e) => e && e.event_id && e.event_type) : []; } catch { return []; } };
+const lsSet = (k: string, v: QEvt[]) => { try { v.length ? localStorage.setItem(k, JSON.stringify(v)) : localStorage.removeItem(k); } catch { /* storage blocked: queue still works in memory */ } };
+const flightConfig = (actor: string, batch: QEvt[]) => ({ ACTOR_BDR_ID: actor, BATCH: JSON.stringify(batch.map(({ by, ...e }) => e)),
+  EVENT_ID: "", EVENT_TYPE: "", CONTACT_ID: "", COMPANY_ID: "", AE_ID: "", RETOUCH_DAYS: "", NOTE: "", PAYLOAD: "" });
+// Start a run and resolve to its run number. Prefer runAsync (rejects on failure); fall back to run() + run.error.
+function startRun(run: any, config: Record<string, string>): Promise<number | undefined> {
+  if (typeof run.runAsync === "function") return run.runAsync(config).then((d: any) => d?.runNumber);
+  if (typeof run.mutateAsync === "function") return run.mutateAsync(config).then((d: any) => d?.runNumber);
+  run.run(config);
+  return Promise.resolve(undefined);
+}
+
 function useActionQueue(acting: string, onSaved: () => void, ob = false) {
-  const [queue, setQueue] = useState<QEvt[]>([]);
+  const lsKey = `bdr-terminal:unsaved:${ob ? "ob" : "in"}`;
+  const [queue, setQueue] = useState<QEvt[]>(() => lsGet(lsKey));
   const [inflightN, setInflightN] = useState(0);
   const [msg, setMsg] = useState("");
+  const [stuck, setStuck] = useState(false);
+  const [since, setSince] = useState<number | null>(() => (lsGet(lsKey).length ? Date.now() : null));
   const inflight = useRef<QEvt[]>([]);
+  const activeRun = useRef<number | undefined>(undefined); // run number of the batch in flight
+  const watchdog = useRef<any>(null);
+  const attempts = useRef(0);
+  const queueRef = useRef<QEvt[]>([]);
+  queueRef.current = queue;
   const run = useRunFlight(FLIGHT_ID);
+
+  // persist everything not yet confirmed saved (queued + in flight)
+  useEffect(() => { lsSet(lsKey, [...inflight.current, ...queue]); }, [queue, inflightN, lsKey]);
+
+  const requeue = (why: string) => {
+    clearTimeout(watchdog.current);
+    const back = inflight.current;
+    inflight.current = [];
+    activeRun.current = undefined;
+    attempts.current += 1;
+    const giveUp = attempts.current > MAX_AUTO_RETRIES;
+    setStuck(giveUp);
+    setQueue((q) => [...back, ...q.filter((e) => !back.some((x) => x.event_id === e.event_id))]);
+    setInflightN(0);
+    setMsg(giveUp ? `✗ couldn't save (${why}). Your actions are kept in this browser.` : `✗ couldn't save (${why}), retrying…`);
+  };
+
+  // when the run number comes back from the polling hook, watch for finish
   useFlightRun(FLIGHT_ID, run.data?.runNumber, {
     onFinished: (x: any) => {
+      if (x?.runNumber != null && activeRun.current != null && x.runNumber !== activeRun.current) return; // stale run (already requeued)
+      if (!inflight.current.length) return;
+      clearTimeout(watchdog.current);
+      attempts.current = 0;
+      setStuck(false);
       const n = inflight.current.length;
-      setMsg(x.status === "SUCCEEDED" ? `✓ saved ${n} action${n === 1 ? "" : "s"}` : "✗ some actions were rejected (only the queue owner can write)");
+      const at = new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+      setMsg(x.status === "SUCCEEDED" ? `✓ saved ${n} action${n === 1 ? "" : "s"} at ${at}` : "✗ some actions were rejected (only the queue owner can write)");
       inflight.current = [];
+      activeRun.current = undefined;
       setInflightN(0);
+      setSince(queueRef.current.length ? Date.now() : null);
       onSaved();
       window.dispatchEvent(new CustomEvent("bdr-xp-saved", { detail: { bdr: acting } }));
     },
   });
+
+  // flush: one batch at a time, all from the same BDR, with backoff after failures
   useEffect(() => {
-    if (inflight.current.length || !queue.length) return;
+    if (inflight.current.length || !queue.length || stuck) return;
+    const delay = attempts.current ? Math.min(900 * 2 ** attempts.current, 30000) : 900;
     const t = setTimeout(() => {
-      const batch = queue.slice(0, 50);
+      const actor = queue[0].by || acting;
+      const batch = queue.filter((e) => (e.by || acting) === actor).slice(0, 50);
       inflight.current = batch;
+      activeRun.current = undefined;
       setInflightN(batch.length);
-      setQueue((q) => q.slice(batch.length));
-      run.run({ ACTOR_BDR_ID: acting, BATCH: JSON.stringify(batch), EVENT_ID: "", EVENT_TYPE: "", CONTACT_ID: "", COMPANY_ID: "", AE_ID: "", RETOUCH_DAYS: "", NOTE: "", PAYLOAD: "" });
-    }, 900);
+      setQueue((q) => q.filter((e) => !batch.includes(e)));
+      watchdog.current = setTimeout(() => { if (inflight.current === batch && activeRun.current == null) requeue("no run started"); }, RUN_START_TIMEOUT);
+      let p: Promise<number | undefined>;
+      try { p = startRun(run, flightConfig(actor, batch)); } catch (e) { requeue(errText(e)); return; }
+      p.then((rn) => {
+        if (inflight.current !== batch) return;
+        if (rn == null) return; // run() fallback: run.error / the start watchdog cover failure
+        activeRun.current = rn;
+        clearTimeout(watchdog.current);
+        watchdog.current = setTimeout(() => { if (inflight.current === batch) requeue("run never reported back"); }, RUN_FINISH_TIMEOUT);
+      }).catch((e) => { if (inflight.current === batch) requeue(errText(e)); });
+    }, delay);
     return () => clearTimeout(t);
-  }, [queue, inflightN, acting]);
-  const enqueue = (e: Omit<QEvt, "event_id">) => {
-    setQueue((q) => [...q, { event_id: newEventId(), ...e }]);
-    const gain = xpForEvent(e.event_type, ob);
-    if (gain) window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, ob, kind: gain[0], xp: gain[1] } }));
-  };
+  }, [queue, inflightN, acting, stuck]);
+
+  // run() fallback path: surface start errors immediately instead of waiting for the watchdog
+  useEffect(() => { if (run.error && inflight.current.length && activeRun.current == null) requeue(errText(run.error)); }, [run.error]);
+  useEffect(() => () => clearTimeout(watchdog.current), []);
+
   const pendingN = queue.length + inflightN;
-  return { enqueue, pendingN, msg: pendingN ? `saving ${pendingN}…` : msg };
+  const enqueue = (e: Omit<QEvt, "event_id">) => {
+    setSince((s0) => s0 ?? Date.now());
+    setQueue((q) => [...q, { event_id: newEventId(), by: acting, ...e }]);
+    const gain = xpForEvent(e.event_type, ob);
+    window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, ob, t: e.event_type, kind: gain?.[0] ?? null, xp: gain?.[1] ?? 0 } }));
+  };
+  const retry = () => { attempts.current = 0; setStuck(false); setMsg(""); setSince(Date.now()); };
+  const pendingKeys = new Set([...queue, ...inflight.current].map((e) => `${e.contact_id ?? e.company_id}:${e.event_type}`));
+  // while saving, SaveStatus renders the ticking "saving N… 4s" line itself (so the feed doesn't re-render every second)
+  const saving = msg.startsWith("✗") ? `${msg} · ${pendingN} unsaved` : `@saving:${pendingN}:${since ?? Date.now()}`;
+  return { enqueue, pendingN, pendingKeys, stuck, retry, msg: pendingN ? saving : msg };
+}
+
+// Status line for the queue, with a Retry button once automatic retries are exhausted
+function SaveStatus({ msg, stuck, onRetry, block }: { msg: string; stuck?: boolean; onRetry?: () => void; block?: boolean }) {
+  const m = /^@saving:(\d+):(\d+)$/.exec(msg || "");
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!m) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [!!m]);
+  if (m) {
+    const n = Number(m[1]);
+    const secs = Math.max(0, Math.round((Date.now() - Number(m[2])) / 1000));
+    msg = `⏳ saving ${n} action${n === 1 ? "" : "s"}… ${secs}s${secs < 15 ? " · usually ~8s" : " · still running, don't re-click"}`;
+  }
+  if (!msg) return null;
+  const bad = msg.startsWith("✗");
+  return (
+    <span style={{ fontSize: fs(10.5), color: bad ? C.danger : C.accent, display: block ? "block" : "inline", marginTop: block ? 6 : 0 }}>
+      {block ? "" : " · "}{msg}
+      {stuck && onRetry && <button onClick={onRetry} style={{ ...btn(C.danger), padding: "0 7px", marginLeft: 6, fontSize: fs(10.5) }}>Retry</button>}
+    </span>
+  );
 }
 
 // Saves a draft (AI original + your final edit) to MotherDuck via the Flight. Never touches HubSpot.
+// Same failure handling as the queue: errors and silent runs end the "saving…" state; a retry reuses the event_id.
 function useDraftSaver(acting: string) {
   const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState(false);
   const run = useRunFlight(FLIGHT_ID);
-  const st = useFlightRun(FLIGHT_ID, run.data?.runNumber, {
-    onFinished: (x: any) => setMsg(x.status === "SUCCEEDED" ? "✓ draft saved to MotherDuck" : "✗ draft not saved"),
+  const last = useRef<Record<string, string> | null>(null);
+  const activeRun = useRef<number | undefined>(undefined);
+  const watchdog = useRef<any>(null);
+  const fail = (why: string) => { clearTimeout(watchdog.current); activeRun.current = undefined; setBusy(false); setMsg(`✗ draft not saved (${why}). Click save to retry.`); };
+  useFlightRun(FLIGHT_ID, run.data?.runNumber, {
+    onFinished: (x: any) => {
+      if (x?.runNumber != null && activeRun.current != null && x.runNumber !== activeRun.current) return;
+      clearTimeout(watchdog.current);
+      setBusy(false);
+      if (x.status === "SUCCEEDED") { last.current = null; setMsg("✓ draft saved to MotherDuck"); } else setMsg("✗ draft not saved");
+    },
   });
+  useEffect(() => { if (run.error && busy && activeRun.current == null) fail(errText(run.error)); }, [run.error]);
+  useEffect(() => () => clearTimeout(watchdog.current), []);
   const save = (contactId: string, ownerId: string, p: any) => {
+    if (busy) return;
     if (ownerId !== acting) { setMsg("not saved: only the queue owner's drafts are stored"); return; }
     if (!/^\d+$/.test(contactId) || !String(p.body || "").trim()) return;
     const clip = (v: any) => String(v ?? "").slice(0, 6000);
     const safe = { ...p, subject: clip(p.subject).slice(0, 300), body: clip(p.body), ai_subject: clip(p.ai_subject).slice(0, 300), ai_body: clip(p.ai_body) };
+    const payload = JSON.stringify(safe);
+    // retrying the same unsaved draft keeps its event_id so it can't be stored twice
+    const eid = last.current && last.current.CONTACT_ID === contactId && last.current.PAYLOAD === payload ? last.current.EVENT_ID : newEventId();
+    const config = { EVENT_ID: eid, ACTOR_BDR_ID: acting, CONTACT_ID: contactId, COMPANY_ID: "", AE_ID: "", EVENT_TYPE: "draft_saved", RETOUCH_DAYS: "", NOTE: "", PAYLOAD: payload };
+    last.current = config;
+    activeRun.current = undefined;
+    setBusy(true);
     setMsg("saving draft…");
-    run.run({ EVENT_ID: newEventId(), ACTOR_BDR_ID: acting, CONTACT_ID: contactId, COMPANY_ID: "", AE_ID: "", EVENT_TYPE: "draft_saved",
-      RETOUCH_DAYS: "", NOTE: "", PAYLOAD: JSON.stringify(safe) });
+    watchdog.current = setTimeout(() => { if (activeRun.current == null) fail("no run started"); }, RUN_START_TIMEOUT);
+    let pr: Promise<number | undefined>;
+    try { pr = startRun(run, config); } catch (e) { fail(errText(e)); return; }
+    pr.then((rn) => {
+      if (rn == null) return;
+      activeRun.current = rn;
+      clearTimeout(watchdog.current);
+      watchdog.current = setTimeout(() => fail("run never reported back"), RUN_FINISH_TIMEOUT);
+    }).catch((e) => fail(errText(e)));
   };
-  return { save, msg, busy: run.isPending || st.isChecking };
+  return { save, msg, busy };
 }
 
 function DraftsTab() {
@@ -2445,7 +3007,7 @@ function DraftsTab() {
 
   return (
     <div style={{ fontFamily: UI.body }}>
-      <h1 style={{ fontSize: UI.game ? fs(20) : 21, fontWeight: 800, margin: UI.game ? "8px 0 4px" : "2px 0 0", fontFamily: UI.pixel }}>Drafting Center</h1>
+      <PageTitle text="Drafting Center" />
       <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
         Below are settings to adjust behavior, like auto CC-ing AE/CE or changing model's voice to a different BDR's style.
       </div>
@@ -2635,7 +3197,12 @@ ORDER BY event_ts DESC LIMIT 1`);
             style={{ ...ctl, width: "100%", fontFamily: "ui-sans-serif, system-ui, sans-serif", fontSize: fs(13), lineHeight: 1.5, resize: "vertical" }} />
           <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
             <a href={gmailUrl(me?.email ?? "", toEmail, cc, [HUBSPOT_BCC], noDash(subject), noDash(body))} target="_blank" rel="noopener noreferrer"
-              onClick={() => { setEdit((p) => ({ ...p, opened: true })); if (canSave) saver.save(r.contact_id, r.queue_owner_id, payload(true)); }}
+              onClick={() => {
+                setEdit((p) => ({ ...p, opened: true }));
+                if (canSave) saver.save(r.contact_id, r.queue_owner_id, payload(true));
+                // the creature carries the envelope; no EXP here (email EXP arrives when it's sent and syncs from HubSpot)
+                window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, t: "gmail_open", kind: null, xp: 0 } }));
+              }}
               style={{ ...btn("#ff7a59"), textDecoration: "none" }}>
               <Mail size={12} /> Open in Gmail
             </a>
@@ -2829,6 +3396,48 @@ type ObAccount = {
   retouch_on: string | null; sqa_info?: string;
 };
 
+function ObTag({ s }: { s: Sig }) {
+  const col = OB_SIG[s.sig]?.color ?? (s.sig === "Single-threaded" ? "#f783ac" : "#8b949e");
+  const g = UI.game;
+  return (
+    <span title={s.handled ? "Touched since" : ""} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(g ? 11.5 : 10.5), padding: g ? "2px 8px" : "1px 7px",
+      borderRadius: g ? 999 : 3, border: `1px solid ${g ? col + "aa" : col + "55"}`, color: g ? shade(col, 0.45) : col, background: g ? `${col}22` : `${col}14`,
+      fontWeight: g ? 600 : 400, whiteSpace: "nowrap", opacity: s.handled ? 0.5 : 1, textDecoration: s.handled ? "line-through" : "none" }}>
+      <span style={{ width: 7, height: 7, borderRadius: 999, background: col }} />{s.sig}
+    </span>
+  );
+}
+// One account in the Outbound list (memoized like FeedRow)
+const ObRow = memo(function ObRow({ a, on, accent, aeText, onSelect }: { a: ObAccount; on: boolean; accent: string; aeText: string; onSelect: (id: string) => void }) {
+  const d = daysSince(a.last_touch);
+  const g = UI.game;
+  const hot = Array.from(new Map(a.signals.filter((s) => !s.handled).map((s) => [s.sig, s])).values());
+  return (
+    <div className="bdr-row" data-on={on ? "1" : "0"} role="button" tabIndex={0} aria-pressed={on} aria-label={a.company}
+      onClick={() => onSelect(a.company_id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(a.company_id); } }}
+      style={{ display: "flex", gap: 10, padding: g ? "12px 12px 12px 14px" : "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
+        borderLeft: `4px solid ${on ? (g ? accent : C.accent) : "transparent"}`, background: on ? (g ? `${accent}17` : C.surfaceAlt) : undefined }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: SP.sm }}>
+          <span style={{ fontSize: fs(g ? 15 : 12.5), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{g && on ? "▶ " : ""}{a.company}</span>
+          <span style={{ fontSize: fs(g ? 12 : 10), fontWeight: g ? 600 : 400, color: d == null ? C.faint : d > 7 ? C.danger : C.faint, flexShrink: 0, whiteSpace: "nowrap" }}>{d == null ? "untouched" : `${d}d ago`}</span>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: g ? 6 : 3 }}>
+          {hot.slice(0, 2).map((s) => <ObTag key={s.sig} s={s} />)}
+          {hot.length > 2 && <span style={{ fontSize: fs(11.5), color: C.faint }}>+{hot.length - 2}</span>}
+          {a.retouch_on && <span style={{ fontSize: fs(11.5), color: C.warn }}>↻ {a.retouch_on}</span>}
+        </div>
+        <div style={{ fontSize: fs(g ? 12.5 : 10.5), color: C.faint, marginTop: g ? 6 : 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {a.segment || "—"} · {a.worked}/{a.contacts.length} worked · AE {aeText}{a.play ? ` · ${a.play}` : ""}
+        </div>
+      </div>
+      <div className="bdr-row-links" style={{ flexShrink: 0 }}>
+        {!a.company_id.startsWith("nocompany") && <a href={HS_COMPANY(a.company_id)} target="_blank" rel="noopener noreferrer" onClick={stopClick} title="HubSpot company" aria-label="Open company in HubSpot" style={miniLink("#ff7a59")}>HS</a>}
+      </div>
+    </div>
+  );
+});
+
 function OutboundFeed() {
   const [acting] = useDiveState<string>("acting", "89400804");
   const [owners] = useDiveState<string[]>("owners", ["89400804"]);
@@ -2953,22 +3562,29 @@ function OutboundFeed() {
   };
 
   const aeLabel = (a: ObAccount) => a.ae_id ? (aeName(a.ae_id) || a.hs_ae_name || `Owner ${a.ae_id}`) : "Unassigned";
-  const scoped = accounts.filter((a) => showPost || !a.post_sqa);
+  const scoped = useMemo(() => accounts.filter((a) => showPost || !a.post_sqa), [accounts, showPost]);
   const counts = useMemo(() => { const m: Record<string, number> = { all: scoped.length }; for (const a of scoped) m[a.bucket] = (m[a.bucket] ?? 0) + 1; return m; }, [scoped]);
   const aeOpts = useMemo(() => Array.from(new Set(scoped.map((a) => a.ae_id).filter(Boolean))).map((id) => [id, aeName(id) || scoped.find((a) => a.ae_id === id)?.hs_ae_name || id] as [string, string]).sort((x, y) => x[1].localeCompare(y[1])), [scoped, pods]);
   const segOpts = useMemo(() => Array.from(new Set(scoped.map((a) => a.segment).filter(Boolean))).sort(), [scoped]);
   const playOpts = useMemo(() => Array.from(new Set(scoped.map((a) => a.play).filter(Boolean))).sort(), [scoped]);
   const needle = search.trim().toLowerCase();
-  const rows = scoped.filter((a) => {
-    if (bucket !== "all" && a.bucket !== bucket) return false;
-    if (aeFilter === "unassigned" && a.ae_id) return false;
-    if (aeFilter !== "any" && aeFilter !== "unassigned" && a.ae_id !== aeFilter) return false;
-    if (segFilter !== "any" && a.segment !== segFilter) return false;
-    if (playFilter !== "any" && a.play !== playFilter) return false;
-    if (obLiF !== "any" && !a.contacts.some((c) => liMatches(obLiF, liInfo(c.ov, c.hs_li)))) return false;
-    if (!needle) return true;
-    return [a.company, a.domain, aeLabel(a), ...a.contacts.map((c) => `${c.contact_name} ${c.email} ${c.title}`)].some((v) => (v || "").toLowerCase().includes(needle));
-  }).sort((x, y) => {
+  // same rules as before, as predicate builders so dropdowns can show live counts
+  const FXo: Record<string, (v: any) => ((a: ObAccount) => boolean) | null> = {
+    ae: (v: string) => (v === "any" ? null : v === "unassigned" ? (a) => !a.ae_id : (a) => a.ae_id === v),
+    seg: (v: string) => (v === "any" ? null : (a) => a.segment === v),
+    play: (v: string) => (v === "any" ? null : (a) => a.play === v),
+    li: (v: string) => (v === "any" ? null : (a) => a.contacts.some((c) => liMatches(v, liInfo(c.ov, c.hs_li)))),
+    search: (v: string) => (v ? (a) => [a.company, a.domain, aeLabel(a), ...a.contacts.map((c) => `${c.contact_name} ${c.email} ${c.title}`)].some((x) => (x || "").toLowerCase().includes(v)) : null),
+  };
+  const ofs: Record<string, any> = { ae: aeFilter, seg: segFilter, play: playFilter, li: obLiF, search: needle };
+  const opreds = Object.entries(ofs).map(([k, v]) => [k, FXo[k](v)] as [string, ((a: ObAccount) => boolean) | null]).filter(([, p]) => p) as [string, (a: ObAccount) => boolean][];
+  const oPass = (a: ObAccount, except: string) => opreds.every(([k, p]) => k === except || p(a));
+  const inObBucket = useMemo(() => scoped.filter((a) => bucket === "all" || a.bucket === bucket), [scoped, bucket]);
+  const oCounts = (key: string, opts: string[]) => {
+    const base = inObBucket.filter((a) => oPass(a, key));
+    return Object.fromEntries(opts.map((v) => { const pr = FXo[key](v); return [v, pr ? base.filter(pr).length : base.length]; }));
+  };
+  const rows = useMemo(() => inObBucket.filter((a) => oPass(a, "")).sort((x, y) => {
     switch (sortBy) {
       case "stale": return (x.last_touch ?? 0) - (y.last_touch ?? 0);
       case "recent": return (y.last_touch ?? 0) - (x.last_touch ?? 0);
@@ -2977,28 +3593,39 @@ function OutboundFeed() {
       case "segment": { const rk: any = { ENT: 0, MM: 1, SMB: 2, Micro: 3 }; return (rk[x.segment] ?? 9) - (rk[y.segment] ?? 9); }
       default: return x.prio - y.prio;
     }
-  });
+  }), [inObBucket, JSON.stringify(ofs), sortBy, pods]);
+  const OB_SORT: [string, string][] = [["priority", "Priority"], ["stale", "Longest since touch"], ["recent", "Most recently touched"], ["contacts", "Most contacts"], ["segment", "Segment (ENT→Micro)"], ["company", "Company A–Z"]];
+  const aeOptList: DOpt[] = [{ v: "any", label: "any" }, { v: "unassigned", label: "Unassigned" }, ...aeOpts.map(([v, label]) => ({ v, label }))];
+  const obMore = (aeFilter !== "any" ? 1 : 0) + (segFilter !== "any" ? 1 : 0) + (playFilter !== "any" ? 1 : 0) + (obLiF !== "any" ? 1 : 0) + (showPost ? 1 : 0);
+  const obPills = [
+    ...(search ? [{ k: "q", label: `Search: "${search}"`, onRemove: () => setSearch("") }] : []),
+    ...(aeFilter !== "any" ? [{ k: "ae", label: `AE: ${aeOptList.find((o) => o.v === aeFilter)?.label ?? aeFilter}`, onRemove: () => setAeFilter("any") }] : []),
+    ...(segFilter !== "any" ? [{ k: "seg", label: `Segment: ${segFilter}`, onRemove: () => setSegFilter("any") }] : []),
+    ...(playFilter !== "any" ? [{ k: "play", label: `Play: ${playFilter}`, onRemove: () => setPlayFilter("any") }] : []),
+    ...(obLiF !== "any" ? [{ k: "li", label: `LinkedIn: ${optLabel(LI_FILTER_OPTS, obLiF)}`, onRemove: () => setObLiF("any") }] : []),
+    ...(showPost ? [{ k: "ps", label: "Post-SQA included", onRemove: () => setShowPost(false) }] : []),
+  ];
+  const obClear = () => { setSearch(""); setAeFilter("any"); setSegFilter("any"); setPlayFilter("any"); setObLiF("any"); setShowPost(false); };
   const cur = rows.find((a) => a.company_id === selected) ?? rows[0];
+  const acctApi = useRef({ setSelected, setDraftFor });
+  acctApi.current = { setSelected, setDraftFor };
+  const onSelectAcct = useCallback((id: string) => { acctApi.current.setSelected(id); acctApi.current.setDraftFor(null); }, []);
   const loading = !accounts.length && (q.isLoading || ovQ.isLoading);
   const [obShown, setObShown] = useState(50);
 
-  const ObTag = ({ s }: { s: Sig }) => {
-    const col = OB_SIG[s.sig]?.color ?? (s.sig === "Single-threaded" ? "#f783ac" : C.muted);
-    return <span title={s.handled ? "Touched since" : ""} style={{ fontSize: fs(10.5), padding: UI.solid ? "2px 9px" : "1px 7px", borderRadius: UI.solid ? 999 : 3, border: `1px solid ${UI.game ? "#9a9a9a" : col + "55"}`, color: UI.game ? C.text : col, background: UI.game ? "#ffffff" : `${col}14`, fontWeight: 400, whiteSpace: "nowrap", opacity: s.handled ? 0.45 : 1, textDecoration: s.handled ? "line-through" : "none" }}>{UI.game && <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: col, marginRight: 5 }} />}{s.sig}</span>;
-  };
 
   return (
-    <div style={{ background: UI.game ? "transparent" : C.page, color: C.text, padding: 18, fontFamily: UI.body }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+    <div className="bdr-page" style={{ background: UI.game ? "transparent" : C.page, color: C.text, fontFamily: UI.body }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: SP.md, marginBottom: SP.lg }}>
         <div>
-          <div style={{ fontSize: fs(10), letterSpacing: 2, color: C.accent }}>BDR TERMINAL // OUTBOUND</div>
-          <h1 style={{ fontSize: UI.game ? fs(20) : 21, fontWeight: 800, margin: UI.game ? "8px 0 4px" : "2px 0 0", fontFamily: UI.pixel }}>Accounts</h1>
+          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: trainerInk(), fontWeight: 700 }}>BDR TERMINAL // OUTBOUND</div>
+          <PageTitle text="Accounts" />
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {loading ? "loading…" : `${scoped.length} accounts · ${scoped.reduce((n, a) => n + a.contacts.length, 0)} Apollo contacts · ${counts.hot ?? 0} hot · ${counts.followup ?? 0} need follow-up`}
             {" · queues + acting-as follow the Signal Feed selectors"}
           </div>
         </div>
-        {runMsg && <span style={{ fontSize: fs(10.5), color: runMsg.startsWith("✗") ? C.danger : C.accent }}>{runMsg}</span>}
+        <SaveStatus msg={runMsg} stuck={aq.stuck} onRetry={aq.retry} block />
       </div>
 
       {!loading && (
@@ -3006,63 +3633,37 @@ function OutboundFeed() {
           {counts.hot ?? 0} account{(counts.hot ?? 0) === 1 ? " is" : "s are"} heating up! {counts.followup ?? 0} need a follow-up{counts.retouch_due ? `, ${counts.retouch_due} retouch${counts.retouch_due > 1 ? "es" : ""} due` : ""}. Where will you go?
         </DialogBox>
       )}
-      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 10, flexWrap: "wrap" }}>
-        {OB_BUCKETS.map((b) => {
-          const on = bucket === b.id;
-          return (
-            <button key={b.id} title={b.hint} onClick={() => { setBucket(b.id); setSelected(null); }} style={{ padding: "6px 12px", fontSize: fs(11.5), fontFamily: "inherit", cursor: "pointer", border: "none",
-              borderBottom: `2px solid ${on ? C.accent : "transparent"}`, background: "transparent", color: on ? C.accent : C.muted, fontWeight: on ? 700 : 400 }}>
-              {b.label} <span style={{ color: on ? C.text : C.faint }}>{counts[b.id] ?? 0}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 12 }}>
-        <div style={{ ...ctl, display: "flex", alignItems: "center", gap: 6, padding: "4px 8px" }}>
-          <Search size={12} color={C.faint} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="company, domain, person, title, AE"
-            style={{ background: "transparent", color: C.text, border: "none", outline: "none", fontSize: fs(11.5), fontFamily: "inherit", width: 190 }} />
+      <div style={{ ...PANEL(), padding: SP.md, marginBottom: SP.lg }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center" }}>
+          <SearchBox value={search} onChange={setSearch} placeholder="Company, domain, person, title, AE" />
+          <Dropdown label="Bucket" options={OB_BUCKETS.map((b) => ({ v: b.id, label: b.label, hint: b.hint }))} value={bucket} isDefault={bucket === "hot"}
+            onChange={(v) => { setBucket(v); setSelected(null); }}
+            counts={() => { const m: Record<string, number> = Object.fromEntries(OB_BUCKETS.map((b) => [b.id, 0])); const base = scoped.filter((a) => oPass(a, "")); m.all = base.length; for (const a of base) m[a.bucket] = (m[a.bucket] ?? 0) + 1; return m; }} />
+          <Dropdown label="Sort" options={toOpts(OB_SORT)} value={sortBy} onChange={setSortBy} isDefault={sortBy === "priority"} menuWidth={240} />
+          <FilterPopover n={obMore}>
+            <Dropdown label="AE" options={aeOptList} value={aeFilter} onChange={setAeFilter} isDefault={aeFilter === "any"} counts={() => oCounts("ae", aeOptList.map((o) => o.v))} menuWidth={280} />
+            <Dropdown label="Segment" options={[{ v: "any", label: "any" }, ...segOpts.map((x) => ({ v: x, label: x }))]} value={segFilter} onChange={setSegFilter} isDefault={segFilter === "any"} counts={() => oCounts("seg", ["any", ...segOpts])} />
+            <Dropdown label="Play" options={[{ v: "any", label: "any" }, ...playOpts.map((x) => ({ v: x, label: x }))]} value={playFilter} onChange={setPlayFilter} isDefault={playFilter === "any"} counts={() => oCounts("play", ["any", ...playOpts])} />
+            <Dropdown label="LinkedIn" options={toOpts(LI_FILTER_OPTS)} value={obLiF} onChange={setObLiF} isDefault={obLiF === "any"} counts={() => oCounts("li", LI_FILTER_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Post-SQA" options={[{ v: "hide", label: "hidden" }, { v: "include", label: "included" }]} value={showPost ? "include" : "hide"} onChange={(v) => setShowPost(v === "include")} isDefault={!showPost}
+              counts={() => { const inB = accounts.filter((a) => (bucket === "all" || a.bucket === bucket) && oPass(a, "")); return { include: inB.length, hide: inB.filter((a) => !a.post_sqa).length }; }} />
+          </FilterPopover>
+          <span style={{ flex: "1 1 0" }} />
+          <span style={{ fontSize: fs(12.5), color: C.faint, whiteSpace: "nowrap" }}>{rows.length} shown</span>
         </div>
-        <Select label="AE" value={aeFilter} onChange={setAeFilter} options={[["any", "any"], ["unassigned", "Unassigned"], ...aeOpts]} />
-        <Select label="Segment" value={segFilter} onChange={setSegFilter} options={[["any", "any"], ...segOpts.map((s) => [s, s] as [string, string])]} />
-        <Select label="Play" value={playFilter} onChange={setPlayFilter} options={[["any", "any"], ...playOpts.map((s) => [s, s] as [string, string])]} />
-        <Select label="LinkedIn" value={obLiF} onChange={setObLiF} options={LI_FILTER_OPTS} />
-        <Select label="Sort" value={sortBy} onChange={setSortBy} options={[["priority", "priority"], ["stale", "longest since touch"], ["recent", "most recently touched"], ["contacts", "most contacts"], ["segment", "segment (ENT→Micro)"], ["company", "company A–Z"]]} />
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-          <input type="checkbox" checked={showPost} onChange={(e) => setShowPost(e.target.checked)} /> post-SQA
-        </label>
-        <span style={{ fontSize: fs(10.5), color: C.faint }}>{rows.length} shown</span>
+        <FilterPills pills={obPills} onClear={obClear} />
       </div>
 
       {q.isError ? <div style={{ color: C.danger, fontSize: fs(12) }}>{String(q.error)}</div> : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 360px) 1fr", gap: 12 }}>
-          <div style={{ ...PANEL(), maxHeight: 660, overflowY: "auto" }}>
-            {loading ? <div style={{ padding: 12 }}>{Array.from({ length: 8 }).map((_, i) => <div key={i} className="animate-pulse" style={{ height: 46, background: C.surfaceAlt, borderRadius: UI.radius2, marginBottom: 8 }} />)}</div>
-              : rows.length === 0 ? <div style={{ padding: 16, fontSize: fs(12), color: C.muted }}>Nothing here.</div>
-              : rows.slice(0, obShown).map((a) => {
-                const on = cur?.company_id === a.company_id;
-                const d = daysSince(a.last_touch);
-                return (
-                  <div key={a.company_id} onClick={() => { setSelected(a.company_id); setDraftFor(null); }} style={{ padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
-                    borderLeft: `3px solid ${on ? C.accent : "transparent"}`, background: on ? (UI.game ? C.accentDim : C.surfaceAlt) : "transparent" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <span style={{ fontSize: fs(12.5), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{UI.game && on ? "▶ " : ""}{a.company}</span>
-                      <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
-                        {!a.company_id.startsWith("nocompany") && <a href={HS_COMPANY(a.company_id)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title="HubSpot company" style={miniLink("#ff7a59")}>HS</a>}
-                        <span style={{ fontSize: fs(10), color: d == null ? C.faint : d > 7 ? C.danger : C.faint }}>{d == null ? "untouched" : `${d}d`}</span>
-                      </span>
-                    </div>
-                    <div style={{ fontSize: fs(10.5), color: C.muted, margin: "2px 0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {a.segment || "—"} · {a.worked}/{a.contacts.length} worked · AE {aeLabel(a)}{a.play ? ` · ${a.play}` : ""}
-                    </div>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {Array.from(new Map(a.signals.filter((s) => !s.handled).map((s) => [s.sig, s])).values()).slice(0, 3).map((s) => <ObTag key={s.sig} s={s} />)}
-                      {a.retouch_on && <span style={{ fontSize: fs(10), color: C.warn }}>↻ {a.retouch_on}</span>}
-                    </div>
-                  </div>
-                );
-              })}
+        <div className="bdr-split">
+          <div className="bdr-list" style={{ ...PANEL(), overflowY: "auto", overscrollBehavior: "contain" }}>
+            {loading ? <LoadingMon bdr={acting} ob label="Scouting accounts" />
+              : rows.length === 0 ? (obPills.length
+                ? <EmptyMon bdr={acting} ob title="No accounts here!">Nothing matches these filters. <button type="button" onClick={obClear} style={{ border: "none", background: "transparent", color: C.accent, cursor: "pointer", fontWeight: 600, fontSize: "inherit", padding: 0 }}>Clear all filters</button></EmptyMon>
+                : <EmptyMon bdr={acting} ob title={bucket === "hot" ? "All quiet out here" : "No accounts here!"}>{bucket === "hot" ? "No hot accounts right now. Try Follow-up or Untouched." : "Nothing in this bucket right now."}</EmptyMon>)
+              : rows.slice(0, obShown).map((a) => (
+                <ObRow key={a.company_id} a={a} on={cur?.company_id === a.company_id} accent={UI.trainer} aeText={aeLabel(a)} onSelect={onSelectAcct} />
+              ))}
             {!loading && rows.length > obShown && (
               <button onClick={() => setObShown(obShown + 50)} style={{ ...btn(C.accent), margin: 10, width: "calc(100% - 20px)", justifyContent: "center" }}>
                 Show 50 more ({rows.length - obShown} left)
@@ -3070,17 +3671,19 @@ function OutboundFeed() {
             )}
           </div>
 
-          <div>
-            {loading ? <div className="animate-pulse" style={{ height: 460, background: C.surface, borderRadius: UI.radius }} /> : !cur ? <div style={{ fontSize: fs(12), color: C.muted }}>Select an account.</div> : (
-              <div style={{ ...PANEL(), padding: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontSize: fs(17), fontWeight: 700 }}>{cur.company}</div>
-                    <div style={{ fontSize: fs(11.5), color: C.muted, marginTop: 2 }}>
+          <div className="bdr-detail" style={{ minWidth: 0 }}>
+            {loading ? <div style={{ ...PANEL() }}><LoadingMon bdr={acting} ob label="Getting the account ready" rows={4} rowH={90} /></div>
+              : !cur ? (rows.length ? <div style={{ ...PANEL() }}><EmptyMon bdr={acting} ob title="Pick an account">Choose an account on the left to see its contacts.</EmptyMon></div> : null) : (
+              <div style={{ ...PANEL(), padding: UI.game ? SP.xl : 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: SP.lg, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+                    <div style={{ fontSize: fs(UI.game ? 21 : 17), fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{cur.company}</div>
+                    <div style={{ display: "flex", gap: SP.sm, flexWrap: "wrap", marginTop: SP.md }}>{Array.from(new Map(cur.signals.filter((x) => !x.handled).map((x) => [x.sig, x])).values()).map((x) => <ObTag key={x.sig} s={x} />)}</div>
+                    <div style={{ fontSize: fs(UI.game ? 13.5 : 11.5), color: C.muted, marginTop: SP.md }}>
                       {[cur.domain, cur.segment, cur.play].filter(Boolean).join(" · ") || "—"}
                       {cur.post_sqa ? ` · post-SQA: ${cur.sqa_info || "qualified deal"}` : ""}
                     </div>
-                    <div style={{ fontSize: fs(11), color: C.faint, marginTop: 2 }}>
+                    <div style={{ fontSize: fs(UI.game ? 12.5 : 11), color: C.faint, marginTop: SP.xs }}>
                       {cur.worked}/{cur.contacts.length} contacts worked · last touch {fmtAgo(cur.last_touch)}{cur.last_by ? ` by ${cur.last_by}` : ""} · queue: {bdrName(cur.owner_id)}
                     </div>
                   </div>
@@ -3090,6 +3693,12 @@ function OutboundFeed() {
                   </div>
                 </div>
 
+                {UI.game && (
+                  <div style={{ ...DIALOG(), display: "flex", alignItems: "center", gap: SP.md, marginTop: SP.lg }}>
+                    <div style={{ flexShrink: 0, lineHeight: 0 }}><MonReactor bdr={acting} ob h={52} /></div>
+                    <div style={{ minWidth: 0 }}><FxPrompt bdr={acting} ob>{cur.owner_id === acting ? <span>Which contact at <b>{cur.company}</b> will you work next?</span> : <span>This is {bdrName(cur.owner_id).split(" ")[0]}'s account. Switch "Acting as" to work it.</span>}</FxPrompt></div>
+                  </div>
+                )}
                 <Section title="AE">
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <b style={{ fontSize: fs(13) }}>{aeLabel(cur)}</b>
@@ -3113,29 +3722,27 @@ function OutboundFeed() {
                     const dis = !mine || busy;
                     const asRow: any = { ...c, company: cur.company, queue_owner_id: c.owner_id, unhandled: c.signals.filter((s) => !s.handled) };
                     return (
-                      <div key={c.contact_id} style={{ borderBottom: `1px solid ${C.border}`, padding: "8px 0" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                      <div key={c.contact_id} style={{ borderBottom: `1px solid ${C.border}`, padding: UI.game ? `${SP.lg}px 0` : "8px 0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: SP.sm, flexWrap: "wrap" }}>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: fs(12.5), fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>{c.contact_name || c.email} <LiBadge li={liInfo(c.ov, c.hs_li)} /></div>
-                            <div style={{ fontSize: fs(10.5), color: C.muted }}>{c.title || "—"} · {c.email}</div>
-                            <div style={{ fontSize: fs(10.5), color: C.faint, marginTop: 2 }}>
+                            <div style={{ fontSize: fs(UI.game ? 15 : 12.5), fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>{c.contact_name || c.email} <LiBadge li={liInfo(c.ov, c.hs_li)} /></div>
+                            <div style={{ fontSize: fs(UI.game ? 13 : 10.5), color: C.muted, marginTop: 2 }}>{c.title || "—"} · {c.email}</div>
+                            <div style={{ fontSize: fs(UI.game ? 12 : 10.5), color: C.faint, marginTop: SP.xs }}>
                               last touch {fmtAgo(c.last_touch)}{c.last_by ? ` · ${c.last_by} · ${c.last_channel}` : ""} · {c.touches_14d} touches/14d · {c.calls_total} calls ({c.calls_connected} conn){c.in_sequence ? " · in sequence" : ""}
                             </div>
                             {liInfo(c.ov, c.hs_li).stage > 0 && <div style={{ marginTop: 3 }}><LiTimeline li={liInfo(c.ov, c.hs_li)} /></div>}
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "flex-start", flexWrap: "wrap" }}>
-                            <a href={HS_CONTACT(c.contact_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none", padding: "2px 7px" }}>HS</a>
-                            {c.linkedin_url && <a href={c.linkedin_url} target="_blank" rel="noopener noreferrer" style={{ ...btn("#5fb3ff"), textDecoration: "none", padding: "2px 7px" }}><Linkedin size={11} /></a>}
-                            <button style={{ ...btn(C.accent), padding: "2px 7px" }} onClick={() => setDraftFor(draftFor === c.contact_id ? null : c.contact_id)}><Sparkles size={11} /> Draft</button>
+                            <a href={HS_CONTACT(c.contact_id)} target="_blank" rel="noopener noreferrer" aria-label="Open contact in HubSpot" style={{ ...btn("#ff7a59"), textDecoration: "none" }}>HS</a>
+                            {c.linkedin_url && <a href={c.linkedin_url} target="_blank" rel="noopener noreferrer" aria-label="Open LinkedIn" style={{ ...btn("#5fb3ff"), textDecoration: "none" }}><Linkedin size={13} /></a>}
+                            <button style={btn(C.accent)} onClick={() => setDraftFor(draftFor === c.contact_id ? null : c.contact_id)}><Sparkles size={13} /> Draft</button>
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: SP.sm }}>
                           {c.signals.map((s) => <ObTag key={s.sig} s={s} />)}
                         </div>
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
-                          {[["linkedin_request_sent", "LI sent"], ["linkedin_accepted", "LI accepted"], ["linkedin_message", "LI msg"], ["linkedin_reply", "LI reply"]].map(([t, l]) => (
-                            <button key={t} disabled={dis} onClick={() => actContact(c, t)} style={{ ...btn("#5fb3ff", dis), padding: "1px 7px", fontSize: fs(10.5) }}>{l}</button>
-                          ))}
+                          <LiButtons li={liInfo(c.ov, c.hs_li ?? "")} cid={c.contact_id} dis={dis} pendingKeys={aq.pendingKeys} onAct={(t) => actContact(c, t)} compact />
                           {[3, 7, 14].map((dd) => <button key={dd} disabled={dis} onClick={() => actContact(c, "retouch_set", { days: dd })} style={{ ...btn(C.warn, dis), padding: "1px 7px", fontSize: fs(10.5) }}>↻ {dd}d</button>)}
                           {c.ov?.retouch_on && <button disabled={dis} onClick={() => actContact(c, "retouch_clear")} style={{ ...btn(C.muted, dis), padding: "1px 7px", fontSize: fs(10.5) }}>clear ↻ {c.ov.retouch_on}</button>}
                           {!mine && <span style={{ fontSize: fs(10), color: C.faint, alignSelf: "center" }}><Lock size={10} /> {bdrName(c.owner_id)}'s contact</span>}
@@ -3161,6 +3768,63 @@ function OutboundFeed() {
     </div>
   );
 }
+
+// One contact in the Signal Feed list. Memoized: only re-renders when its own data or selection changes.
+const stopClick = (e: any) => e.stopPropagation();
+const FeedRow = memo(function FeedRow({ r, on, drafted, multiOwner, ov, accent, onSelect, onToggleDraft }:
+  { r: Row; on: boolean; drafted: boolean; multiOwner: boolean; ov?: Ov; accent: string; onSelect: (id: string) => void; onToggleDraft: (id: string) => void }) {
+  const touches = r.touches_14d + (r.ov?.linkedin_14d ?? 0);
+  const hp = Math.min(100, Math.round((touches / CADENCE_TARGET_14D) * 100));
+  const lead = r.unhandled[0] ?? r.signals[0];
+  const more = r.signals.length - 1;
+  const d = daysSince(r.last_touch);
+  const g = UI.game;
+  const name = r.contact_name || r.email;
+  return (
+    <div className="bdr-row" data-on={on ? "1" : "0"} role="button" tabIndex={0} aria-pressed={on} aria-label={`${name}${lead ? `, ${lead.sig}` : ""}`}
+      onClick={() => onSelect(r.contact_id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(r.contact_id); } }}
+      style={{ display: "flex", gap: g ? 10 : 8, alignItems: "flex-start", padding: g ? "12px 12px 12px 10px" : "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
+        borderLeft: `4px solid ${on ? (g ? accent : sigMeta(lead?.sig ?? "").color) : "transparent"}`, background: on ? (g ? `${accent}17` : C.surfaceAlt) : undefined }}>
+      <input type="checkbox" checked={drafted} onClick={stopClick} onChange={() => onToggleDraft(r.contact_id)} aria-label={`Select ${name} for AI draft`}
+        style={{ width: 16, height: 16, margin: g ? "3px 0 0" : "2px 0 0", cursor: "pointer", flexShrink: 0 }} />
+      {multiOwner && (
+        <span title={`${bdrName(r.queue_owner_id)}'s queue`} style={{ width: 28, height: 28, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Sprite map={lineFor(r.queue_owner_id, false)[0].map} pal={palOf(r.queue_owner_id, false, false)} h={28} />
+        </span>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: SP.sm }}>
+          <span style={{ fontSize: fs(g ? 15 : 12.5), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{g && on ? "▶ " : ""}{name}</span>
+          <span style={{ fontSize: fs(g ? 12 : 10), fontWeight: g ? 600 : 400, color: d == null || d > 7 ? C.danger : C.faint, flexShrink: 0, whiteSpace: "nowrap" }}>{d == null ? "untouched" : `${d}d ago`}</span>
+        </div>
+        <div style={{ display: "flex", gap: SP.xs + 2, alignItems: "center", flexWrap: "wrap", marginTop: g ? 6 : 3 }}>
+          {lead && <SignalTag s={lead} />}
+          {more > 0 && <span style={{ fontSize: fs(g ? 11.5 : 10), color: C.faint }}>+{more}</span>}
+          <LiBadge li={liInfo(ov ?? r.ov, r.hs_li)} />
+        </div>
+        <div style={{ fontSize: fs(g ? 12.5 : 10.5), color: C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: g ? 6 : 3 }}>
+          {r.company || "—"} · created {fmtAgo(r.created)}
+          {r.last_by && r.last_by_id !== r.queue_owner_id ? ` · last: ${r.last_by}` : ""}
+          {r.ov?.retouch_on ? ` · ↻ ${r.ov.retouch_on}` : ""}
+        </div>
+        {g && touches > 0 && (
+          <div title={`Cadence: ${touches}/${CADENCE_TARGET_14D} touches in 14 days`} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+            <span style={{ fontSize: fs(9.5), fontWeight: 800, color: C.faint, letterSpacing: 0.5 }}>HP</span>
+            <div style={{ flex: 1, maxWidth: 120, height: 4, borderRadius: 2, background: "#e7eaee", overflow: "hidden" }}>
+              <div style={{ width: `${hp}%`, height: "100%", background: hp >= 100 ? "#48c050" : hp >= 50 ? "#f0c030" : "#f05030" }} />
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="bdr-row-links" style={{ display: "flex", flexDirection: "column", gap: SP.xs, flexShrink: 0 }}>
+        <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" onClick={stopClick} title="Open in HubSpot (h)" aria-label="Open in HubSpot" style={miniLink("#ff7a59")}>HS</a>
+        {r.linkedin_url
+          ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={stopClick} title="Open LinkedIn (l)" aria-label="Open LinkedIn" style={miniLink("#5fb3ff")}><Linkedin size={13} /></a>
+          : <span title="No LinkedIn on file" style={{ ...miniLink(C.faint), opacity: 0.35, cursor: "default" }}><Linkedin size={13} /></span>}
+      </div>
+    </div>
+  );
+});
 
 function SignalFeed() {
   const [acting, setActing] = useDiveState<string>("acting", "89400804");
@@ -3267,61 +3931,73 @@ function SignalFeed() {
     }
   };
 
-  const scoped = derived.filter((r) => showPost || !r.post_sqa);
+  const scoped = useMemo(() => derived.filter((r) => showPost || !r.post_sqa), [derived, showPost]);
   const bucketCounts = useMemo(() => {
     const m: Record<string, number> = { all: scoped.length };
     for (const r of scoped) m[r.bucket] = (m[r.bucket] ?? 0) + 1;
     return m;
   }, [scoped]);
-  const inBucket = scoped.filter((r) => bucket === "all" || r.bucket === bucket);
-  const sigCounts = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const r of inBucket) for (const k of new Set(r.signals.map((s) => chipKey(s.sig)))) m[k] = (m[k] ?? 0) + 1;
-    return m;
-  }, [inBucket]);
+  const inBucket = useMemo(() => scoped.filter((r) => bucket === "all" || r.bucket === bucket), [scoped, bucket]);
   const stages = useMemo(() => Array.from(new Set(scoped.map((r) => r.lifecycle).filter(Boolean))).sort(), [scoped]);
   const plans = useMemo(() => Array.from(new Set(scoped.map((r) => r.plan).filter(Boolean))).sort(), [scoped]);
 
   const needle = search.trim().toLowerCase();
-  const filtered = inBucket.filter((r) => {
-    if (sigSel.length && !r.signals.some((s) => sigSel.includes(chipKey(s.sig)))) return false;
-    if (stage !== "any" && r.lifecycle !== stage) return false;
-    if (plan !== "any" && r.plan !== plan) return false;
-    if (hasLi && !r.linkedin_url) return false;
-    if (opened !== "any") {
+  // Each filter is a predicate builder: value -> (row -> bool), or null when the filter is off.
+  // Same rules as before; split out so dropdowns can count "every other filter + this option".
+  const FX = useMemo<Record<string, (v: any) => ((r: Row) => boolean) | null>>(() => ({
+    sigs: (v: string[]) => (v.length ? (r) => r.signals.some((s) => v.includes(chipKey(s.sig))) : null),
+    stage: (v: string) => (v === "any" ? null : (r) => r.lifecycle === v),
+    plan: (v: string) => (v === "any" ? null : (r) => r.plan === v),
+    hasLi: (v: boolean) => (v ? (r) => !!r.linkedin_url : null),
+    opened: (v: string) => (v === "any" ? null : (r) => {
       const od = daysSince(r.last_opened);
-      if (opened === "never" && r.last_opened != null) return false;
-      if (opened === "since_touch" && !(r.last_opened != null && (r.last_touch == null || r.last_opened > r.last_touch))) return false;
-      if (opened === "le1" && !(od != null && od <= 1)) return false;
-      if (opened === "le3" && !(od != null && od <= 3)) return false;
-      if (opened === "le7" && !(od != null && od <= 7)) return false;
-      if (opened === "clicked" && !(r.last_clicked != null && (r.last_touch == null || r.last_clicked > r.last_touch))) return false;
-    }
-    if (pages.length && !pages.some((p) => r.page_cats.includes(p))) return false;
-    if (liF !== "any" && !liMatches(liF, liInfo(r.ov, r.hs_li))) return false;
-    if (ctOwner !== "any" && (ctOwner === "same" ? r.owner_id !== r.queue_owner_id : ctOwner === "other" ? r.owner_id === r.queue_owner_id : r.owner_id !== ctOwner)) return false;
-    if (touchedBy !== "any") {
+      if (v === "never") return r.last_opened == null;
+      if (v === "since_touch") return r.last_opened != null && (r.last_touch == null || r.last_opened > r.last_touch);
+      if (v === "le1") return od != null && od <= 1;
+      if (v === "le3") return od != null && od <= 3;
+      if (v === "le7") return od != null && od <= 7;
+      if (v === "clicked") return r.last_clicked != null && (r.last_touch == null || r.last_clicked > r.last_touch);
+      return true;
+    }),
+    pages: (v: string[]) => (v.length ? (r) => v.some((p) => r.page_cats.includes(p)) : null),
+    liF: (v: string) => (v === "any" ? null : (r) => liMatches(v, liInfo(r.ov, r.hs_li))),
+    ctOwner: (v: string) => (v === "any" ? null : (r) => (v === "same" ? r.owner_id === r.queue_owner_id : v === "other" ? r.owner_id !== r.queue_owner_id : r.owner_id === v)),
+    touchedBy: (v: string) => (v === "any" ? null : (r) => {
       const id = r.last_by_id;
-      if (touchedBy === "never" && r.last_touch != null) return false;
-      if (touchedBy === "me" && id !== acting) return false;
-      if (touchedBy === "owner" && id !== r.queue_owner_id) return false;
-      if (touchedBy === "other_bdr" && !(id && ROSTER.has(id) && id !== r.queue_owner_id)) return false;
-      if (touchedBy === "ae" && !(id && !ROSTER.has(id))) return false;
-    }
-    if (fresh !== "any") {
+      if (v === "never") return r.last_touch == null;
+      if (v === "me") return id === acting;
+      if (v === "owner") return id === r.queue_owner_id;
+      if (v === "other_bdr") return !!(id && ROSTER.has(id) && id !== r.queue_owner_id);
+      if (v === "ae") return !!(id && !ROSTER.has(id));
+      return true;
+    }),
+    fresh: (v: string) => (v === "any" ? null : (r) => {
       const d = daysSince(r.last_touch);
-      if (fresh === "never" && d != null) return false;
-      if (fresh === "gt7" && !(d == null || d > 7)) return false;
-      if (fresh === "gt3" && !(d == null || d > 3)) return false;
-      if (fresh === "le7" && !(d != null && d <= 7)) return false;
+      if (v === "never") return d == null;
+      if (v === "gt7") return d == null || d > 7;
+      if (v === "gt3") return d == null || d > 3;
+      if (v === "le7") return d != null && d <= 7;
+      return true;
+    }),
+    created: (v: string) => (v === "any" ? null : (r) => { const d = daysSince(r.created); return d != null && d <= Number(v); }),
+    search: (v: string) => (v ? (r) => [r.contact_name, r.email, r.company, r.ae_name, r.last_by, r.org_name].some((x) => (x || "").toLowerCase().includes(v)) : null),
+  }), [acting]);
+  const fstate: Record<string, any> = { sigs: sigSel, stage, plan, hasLi, opened, pages: Array.isArray(pages) ? pages : [], liF, ctOwner, touchedBy, fresh, created: createdWin, search: needle };
+  const fkey = JSON.stringify(fstate);
+  const preds = useMemo(() => Object.entries(fstate).map(([k, v]) => [k, FX[k](v)] as [string, ((r: Row) => boolean) | null]).filter(([, p]) => p) as [string, (r: Row) => boolean][], [fkey, FX]);
+  const passExcept = (r: Row, except: string) => preds.every(([k, p]) => k === except || p(r));
+  const filtered = useMemo(() => inBucket.filter((r) => passExcept(r, "")), [inBucket, preds]);
+  // live counts for a dropdown: rows passing every other filter, split by this filter's options
+  const countsFor = (key: string, opts: string[], src: Row[] = inBucket) => {
+    const base = src.filter((r) => passExcept(r, key));
+    const m: Record<string, number> = {};
+    for (const v of opts) {
+      const pv = key === "sigs" || key === "pages" ? [v] : key === "hasLi" ? v === "yes" : v;
+      const pr = FX[key](pv);
+      m[v] = pr ? base.filter(pr).length : base.length;
     }
-    if (createdWin !== "any") {
-      const d = daysSince(r.created);
-      if (d == null || d > Number(createdWin)) return false;
-    }
-    if (!needle) return true;
-    return [r.contact_name, r.email, r.company, r.ae_name, r.last_by, r.org_name].some((v) => (v || "").toLowerCase().includes(needle));
-  });
+    return m;
+  };
 
   const sortVal = (r: Row): number | string => {
     switch (sortBy) {
@@ -3339,11 +4015,11 @@ function SignalFeed() {
       default: return r.prio;
     }
   };
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const av = sortVal(a), bv = sortVal(b);
     const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
     return sortDir === "asc" ? cmp : -cmp;
-  });
+  }), [filtered, sortBy, sortDir]);
   const current = sorted.find((r) => r.contact_id === selected) ?? sorted[0];
   useEffect(() => { setShown(50); }, [bucket, sortBy, sortDir, search, sigSel.join(","), opened, pages.join(","), createdWin, hasLi, ownersSql]);
   useEffect(() => { const i = sorted.findIndex((x) => x.contact_id === current?.contact_id); if (i >= shown) setShown(i + 25); }, [current?.contact_id]);
@@ -3351,6 +4027,7 @@ function SignalFeed() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement)?.closest?.("[data-bdr-menu]")) return;
       const idx = sorted.findIndex((x) => x.contact_id === current?.contact_id);
       if (e.key === "j" || e.key === "ArrowDown") { const n = sorted[idx + 1]; if (n) { setSelected(n.contact_id); e.preventDefault(); } return; }
       if (e.key === "k" || e.key === "ArrowUp") { const n = sorted[idx - 1]; if (n) { setSelected(n.contact_id); e.preventDefault(); } return; }
@@ -3366,23 +4043,43 @@ function SignalFeed() {
     return () => window.removeEventListener("keydown", onKey);
   });
   const multiOwner = scopeIds.length > 1;
+  const rowApi = useRef({ setSelected, toggleDraft, sorted });
+  rowApi.current = { setSelected, toggleDraft, sorted };
+  const onSelectRow = useCallback((id: string) => rowApi.current.setSelected(id), []);
+  const onToggleDraftRow = useCallback((id: string) => { const r = rowApi.current.sorted.find((x) => x.contact_id === id); if (r) rowApi.current.toggleDraft(r); }, []);
   // Contact Owner (HubSpot) can be any BDR, AE or GTM person; list the ones in scope, most contacts first
-  const ctOwnerOptions: [string, string][] = (() => {
+  const ctOwnerOptions: DOpt[] = useMemo(() => {
     const m = new Map<string, { name: string; n: number }>();
     scoped.forEach((r) => { if (!r.owner_id) return; const e = m.get(r.owner_id) ?? { name: r.contact_owner || bdrName(r.owner_id), n: 0 }; e.n++; m.set(r.owner_id, e); });
-    const list = [...m.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => [id, `${e.name} (${e.n})`] as [string, string]);
-    return [["any", "anyone"], ["same", "same as BDR owner"], ["other", "someone else"], ...list];
-  })();
-  const activeFilters = sigSel.length + (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) + (liF !== "any" ? 1 : 0) +
-    (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (search ? 1 : 0) + (opened !== "any" ? 1 : 0) + (pages.length ? 1 : 0);
+    const list = [...m.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => ({ v: id, label: e.name }));
+    return [{ v: "any", label: "anyone" }, { v: "same", label: "same as BDR owner" }, { v: "other", label: "someone else" }, ...list];
+  }, [scoped]);
   const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setLiF("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
+  // filters living under "All filters" (for its badge) and the removable pills
+  const moreActive = (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) + (liF !== "any" ? 1 : 0) +
+    (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (opened !== "any" ? 1 : 0) + (Array.isArray(pages) && pages.length ? 1 : 0) + (showPost ? 1 : 0);
+  const pills = [
+    ...(search ? [{ k: "q", label: `Search: "${search}"`, onRemove: () => setSearch("") }] : []),
+    ...sigSel.map((k) => ({ k: "s:" + k, label: k, color: CHIPS.find((c) => c[0] === k)?.[1], onRemove: () => setSigSel(sigSel.filter((x) => x !== k)) })),
+    ...(ctOwner !== "any" ? [{ k: "co", label: `Contact owner: ${ctOwnerOptions.find((o) => o.v === ctOwner)?.label ?? ctOwner}`, onRemove: () => setCtOwner("any") }] : []),
+    ...(liF !== "any" ? [{ k: "li", label: `LinkedIn: ${optLabel(LI_FILTER_OPTS, liF)}`, onRemove: () => setLiF("any") }] : []),
+    ...(touchedBy !== "any" ? [{ k: "tb", label: `Last touch by: ${optLabel(TOUCHED_OPTS, touchedBy)}`, onRemove: () => setTouchedBy("any") }] : []),
+    ...(fresh !== "any" ? [{ k: "fr", label: `Freshness: ${optLabel(FRESH_OPTS, fresh)}`, onRemove: () => setFresh("any") }] : []),
+    ...(opened !== "any" ? [{ k: "op", label: `Email opened: ${optLabel(OPENED_OPTS, opened)}`, onRemove: () => setOpened("any") }] : []),
+    ...(Array.isArray(pages) ? pages : []).map((pg) => ({ k: "pg:" + pg, label: `Page: ${pg}`, onRemove: () => setPages(pages.filter((x) => x !== pg)) })),
+    ...(createdWin !== "any" ? [{ k: "cr", label: `Created ${optLabel(CREATED_OPTS, createdWin)}`, onRemove: () => setCreatedWin("any") }] : []),
+    ...(stage !== "any" ? [{ k: "st", label: `Stage: ${stage}`, onRemove: () => setStage("any") }] : []),
+    ...(plan !== "any" ? [{ k: "pl", label: `Plan: ${plan.replace("_", " ")}`, onRemove: () => setPlan("any") }] : []),
+    ...(hasLi ? [{ k: "hl", label: "Has LinkedIn profile", onRemove: () => setHasLi(false) }] : []),
+    ...(showPost ? [{ k: "ps", label: "Post-SQA included", onRemove: () => setShowPost(false) }] : []),
+  ];
 
   // HubSpot bar: lives inside the dialog box in the Unova theme, in the header otherwise.
   const hsButtons = (
     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
       <a href={HS_INDEX} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}><ExternalLink size={12} /> Open in HubSpot</a>
       <button style={btn(C.accent)} onClick={() => copyText("filters", hubspotRecipe({ owners: scopeIds, bucket, sigs: sigSel, opened, pages, hasLi, createdWin }).join("\nAND "))}>Copy HubSpot filters</button>
-      <button style={btn(C.accent)} onClick={() => copyText("emails", sorted.map((r) => r.email).filter(Boolean).join(", "))}>Copy {sorted.filter((r) => r.email).length} emails</button>
+      <button style={btn(C.accent)} onClick={() => copyText("emails", sorted.map((r) => r.email).filter(Boolean).join(", "))}>{(() => { const n = sorted.filter((r) => r.email).length; return `Copy ${n} email${n === 1 ? "" : "s"}`; })()}</button>
       <button style={btn(C.muted)} onClick={() => setShowRecipe(!showRecipe)}>{showRecipe ? "Hide" : "Show"} filter recipe</button>
       {copied && <span style={{ fontSize: fs(10.5), color: C.ok }}>✓ {copied} copied</span>}
     </div>
@@ -3408,27 +4105,25 @@ function SignalFeed() {
   );
 
   return (
-    <div style={{ background: UI.game ? "transparent" : C.page, color: C.text, minHeight: "100%", padding: 18, fontFamily: UI.body }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+    <div className="bdr-page" style={{ background: UI.game ? "transparent" : C.page, color: C.text, minHeight: "100%", fontFamily: UI.body }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: SP.md, marginBottom: SP.lg }}>
         <div>
-          <div style={{ fontSize: fs(10), letterSpacing: 2, color: C.accent }}>BDR TERMINAL // INBOUND</div>
-          <h1 style={{ fontSize: UI.game ? fs(20) : 21, fontWeight: 800, margin: UI.game ? "8px 0 4px" : "2px 0 0", fontFamily: UI.pixel }}>Signal Feed</h1>
+          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: trainerInk(), fontWeight: 700 }}>BDR TERMINAL // INBOUND</div>
+          <PageTitle text="Signal Feed" />
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {firstLoad ? "loading…" : `${scoped.length} contacts in scope · ${bucketCounts.active ?? 0} active · ${bucketCounts.retouch_due ?? 0} retouch due`}
             {ovQ.isError ? " · overlay unavailable (read-only)" : ""}
-            {aq.msg ? <span style={{ color: aq.msg.startsWith("✗") ? C.danger : C.accent }}> · {aq.msg}</span> : null}
+            <SaveStatus msg={aq.msg} stuck={aq.stuck} onRetry={aq.retry} />
           </div>
           {!UI.game && hsButtons}
           {!UI.game && hsPanels}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(10.5), color: C.faint }}>
-            Acting as
-            <select value={acting} onChange={(e) => setActing(e.target.value)} style={{ ...ctl, cursor: "pointer", color: C.accent }}>
-              {BDRS.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          </label>
-          <BdrMultiSelect selected={scopeIds} onChange={(v) => { setOwners(v); setSelected(null); }} />
+          <Dropdown label="Acting as" options={BDRS.map(bdrOpt)} value={acting} onChange={setActing} isDefault align="right" menuWidth={260} />
+          <Dropdown label="Queues" multi options={BDRS.map(bdrOpt)} values={scopeIds} align="right" menuWidth={280} isDefault={scopeIds.length === 1 && scopeIds[0] === acting}
+            display={scopeIds.length === BDRS.length ? "All BDRs" : scopeIds.length === 1 ? bdrName(scopeIds[0]) : `${scopeIds.length} BDRs`}
+            onChangeMulti={(v) => { setOwners(v.length ? v : [acting]); setSelected(null); }} onOnly={(v) => { setOwners([v]); setSelected(null); }}
+            counts={() => { const m: Record<string, number> = Object.fromEntries(BDRS.map((b) => [b.id, 0])); for (const r of rows) m[r.queue_owner_id] = (m[r.queue_owner_id] ?? 0) + 1; return m; }} />
         </div>
       </div>
 
@@ -3442,130 +4137,80 @@ function SignalFeed() {
         </DialogBox>
       )}
       {UI.game && hsPanels}
-      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 10, flexWrap: "wrap" }}>
-        {BUCKETS.map((b) => {
-          const on = bucket === b.id;
-          return (
-            <button key={b.id} title={b.hint} onClick={() => { setBucket(b.id); setSelected(null); }} style={{
-              padding: "6px 12px", fontSize: fs(11.5), fontFamily: "inherit", cursor: "pointer", border: "none",
-              borderBottom: `2px solid ${on ? C.accent : "transparent"}`, background: "transparent", color: on ? C.accent : C.muted, fontWeight: on ? 700 : 400,
-            }}>
-              {b.label} <span style={{ color: on ? C.text : C.faint }}>{bucketCounts[b.id] ?? 0}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-        {CHIPS.map(([k, col]) => (
-          <Chip key={k} label={k} color={col} count={sigCounts[k] ?? 0} active={sigSel.includes(k)}
-            onClick={() => setSigSel(sigSel.includes(k) ? sigSel.filter((x) => x !== k) : [...sigSel, k])} />
-        ))}
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 12 }}>
-        <div style={{ ...ctl, display: "flex", alignItems: "center", gap: 6, padding: "4px 8px" }}>
-          <Search size={12} color={C.faint} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="name, company, AE, toucher"
-            style={{ background: "transparent", color: C.text, border: "none", outline: "none", fontSize: fs(11.5), fontFamily: "inherit", width: 170 }} />
+      {/* filter bar: the common filters up front, the rest under "All filters"; active ones show as pills */}
+      <div style={{ ...PANEL(), padding: SP.md, marginBottom: SP.lg }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center" }}>
+          <SearchBox value={search} onChange={setSearch} placeholder="Name, company, AE, toucher" />
+          <Dropdown label="Bucket" options={BUCKETS.map((b) => ({ v: b.id, label: b.label, hint: b.hint }))} value={bucket} isDefault={bucket === "active"}
+            onChange={(v) => { setBucket(v); setSelected(null); }}
+            counts={() => { const m: Record<string, number> = Object.fromEntries(BUCKETS.map((b) => [b.id, 0])); const base = scoped.filter((r) => passExcept(r, "")); m.all = base.length; for (const r of base) m[r.bucket] = (m[r.bucket] ?? 0) + 1; return m; }} />
+          <Dropdown label="Signals" multi options={CHIPS.map(([k, c]) => ({ v: k, label: k, color: c }))} values={sigSel} onChangeMulti={setSigSel}
+            counts={() => countsFor("sigs", CHIPS.map(([k]) => k))} />
+          <Dropdown label="Sort" options={toOpts(SORT_OPTS)} value={sortBy} onChange={setSortBy} isDefault={sortBy === "priority"} menuWidth={240} />
+          <button type="button" onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")} title="Flip sort direction" aria-label={`Sort ${sortDir === "asc" ? "ascending" : "descending"}`}
+            style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><ArrowUpDown size={14} /> {sortDir}</button>
+          <FilterPopover n={moreActive}>
+            <Dropdown label="Contact owner" options={ctOwnerOptions} value={ctOwner} onChange={setCtOwner} isDefault={ctOwner === "any"} counts={() => countsFor("ctOwner", ctOwnerOptions.map((o) => o.v))} menuWidth={280} />
+            <Dropdown label="LinkedIn" options={toOpts(LI_FILTER_OPTS)} value={liF} onChange={setLiF} isDefault={liF === "any"} counts={() => countsFor("liF", LI_FILTER_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Last touch by" options={toOpts(TOUCHED_OPTS)} value={touchedBy} onChange={setTouchedBy} isDefault={touchedBy === "any"} counts={() => countsFor("touchedBy", TOUCHED_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Freshness" options={toOpts(FRESH_OPTS)} value={fresh} onChange={setFresh} isDefault={fresh === "any"} counts={() => countsFor("fresh", FRESH_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Email opened" options={toOpts(OPENED_OPTS)} value={opened} onChange={setOpened} isDefault={opened === "any"} counts={() => countsFor("opened", OPENED_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Pages viewed" multi options={PAGE_OPTS.map((v) => ({ v, label: v }))} values={Array.isArray(pages) ? pages : []} onChangeMulti={setPages} counts={() => countsFor("pages", PAGE_OPTS)} />
+            <Dropdown label="Created" options={toOpts(CREATED_OPTS)} value={createdWin} onChange={setCreatedWin} isDefault={createdWin === "any"} counts={() => countsFor("created", CREATED_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Stage" options={[{ v: "any", label: "any" }, ...stages.map((x) => ({ v: x, label: x }))]} value={stage} onChange={setStage} isDefault={stage === "any"} counts={() => countsFor("stage", ["any", ...stages])} />
+            <Dropdown label="Plan" options={[{ v: "any", label: "any" }, ...plans.map((x) => ({ v: x, label: x.replace("_", " ") }))]} value={plan} onChange={setPlan} isDefault={plan === "any"} counts={() => countsFor("plan", ["any", ...plans])} />
+            <Dropdown label="LinkedIn profile" options={[{ v: "any", label: "any" }, { v: "yes", label: "has a profile URL" }]} value={hasLi ? "yes" : "any"} onChange={(v) => setHasLi(v === "yes")} isDefault={!hasLi} counts={() => countsFor("hasLi", ["any", "yes"])} />
+            <Dropdown label="Post-SQA" options={[{ v: "hide", label: "hidden", hint: "Contacts or companies with a live SQA stay out of the queue" }, { v: "include", label: "included" }]} value={showPost ? "include" : "hide"} onChange={(v) => setShowPost(v === "include")} isDefault={!showPost}
+              counts={() => { const inB = derived.filter((r) => (bucket === "all" || r.bucket === bucket) && passExcept(r, "")); return { include: inB.length, hide: inB.filter((r) => !r.post_sqa).length }; }} />
+          </FilterPopover>
+          <span style={{ flex: "1 1 0" }} />
+          <span style={{ fontSize: fs(12.5), color: C.faint, whiteSpace: "nowrap" }}>{sorted.length} shown</span>
+          <button style={{ ...ctl, cursor: "pointer" }} title="Select the top contacts in the current view (max 15)"
+            onClick={() => setDraftSel([...draftList, ...sorted.filter((r) => !draftIds.has(r.contact_id)).slice(0, Math.max(0, 15 - draftList.length)).map(mkDraft)])}>Select top</button>
+          {draftIds.size > 0 && <button style={{ ...ctl, cursor: "pointer", color: C.faint }} onClick={() => setDraftSel([])}>Clear selection</button>}
+          <button style={btn(C.accent, draftIds.size === 0)} disabled={draftIds.size === 0} onClick={() => setTab("drafts")}><Mail size={14} /> Draft {draftIds.size}</button>
         </div>
-        <Select label="Contact owner" value={ctOwner} onChange={setCtOwner} options={ctOwnerOptions} />
-        <Select label="LinkedIn" value={liF} onChange={setLiF} options={LI_FILTER_OPTS} />
-        <Select label="Last touch by" value={touchedBy} onChange={setTouchedBy} options={[["any", "anyone"], ["me", "me (acting)"], ["owner", "queue owner"], ["other_bdr", "another BDR"], ["ae", "AE / non-BDR"], ["never", "never touched"]]} />
-        <Select label="Freshness" value={fresh} onChange={setFresh} options={[["any", "any"], ["never", "never touched"], ["gt3", "> 3d since touch"], ["gt7", "> 7d since touch"], ["le7", "touched ≤ 7d"]]} />
-        <Select label="Email opened" value={opened} onChange={setOpened} options={[["any", "any"], ["since_touch", "since our last touch"], ["le1", "≤ 1d ago"], ["le3", "≤ 3d ago"], ["le7", "≤ 7d ago"], ["clicked", "clicked since last touch"], ["never", "never opened"]]} />
-        <MultiPick label="Pages viewed" options={["Pricing", "Docs", "Product", "Blog", "Trial / ad landing", "Books / courses", "Events", "Contact / customers", "Homepage", "Careers"]} selected={Array.isArray(pages) ? pages : []} onChange={setPages} />
-        <Select label="Created" value={createdWin} onChange={setCreatedWin} options={[["any", "any time"], ["1", "≤ 1d"], ["3", "≤ 3d"], ["7", "≤ 7d"], ["30", "≤ 30d"], ["90", "≤ 90d"]]} />
-        <Select label="Stage" value={stage} onChange={setStage} options={[["any", "any"], ...stages.map((s) => [s, s] as [string, string])]} />
-        <Select label="Plan" value={plan} onChange={setPlan} options={[["any", "any"], ...plans.map((s) => [s, s.replace("_", " ")] as [string, string])]} />
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-          <input type="checkbox" checked={hasLi} onChange={(e) => setHasLi(e.target.checked)} /> has LinkedIn
-        </label>
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-          <input type="checkbox" checked={showPost} onChange={(e) => setShowPost(e.target.checked)} /> post-SQA
-        </label>
-        <Select label="Sort" value={sortBy} onChange={setSortBy} options={[
-          ["priority", "priority"], ["signal_new", "newest signal"], ["stale", "longest since touch"], ["created_new", "created: newest"],
-          ["created_old", "created: oldest"], ["stl", "slowest speed-to-lead"], ["touches", "fewest touches (14d)"], ["awr", "AWR"],
-          ["cpu", "CPU 7d"], ["trial_end", "trial ending soonest"], ["owner", "queue owner"], ["company", "company A–Z"],
-        ]} />
-        <button style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}>
-          <ArrowUpDown size={12} /> {sortDir === "asc" ? "asc" : "desc"}
-        </button>
-        <button style={btn(C.accent, draftIds.size === 0)} disabled={draftIds.size === 0} onClick={() => setTab("drafts")}><Mail size={12} /> Draft {draftIds.size}</button>
-        <button style={{ ...ctl, cursor: "pointer" }} title="Select the top contacts in the current view (max 15)"
-          onClick={() => setDraftSel([...draftList, ...sorted.filter((r) => !draftIds.has(r.contact_id)).slice(0, Math.max(0, 15 - draftList.length)).map(mkDraft)])}>select top</button>
-        {draftIds.size > 0 && <button style={{ ...ctl, cursor: "pointer", color: C.faint }} onClick={() => setDraftSel([])}>clear sel</button>}
-        {activeFilters > 0 && <button style={{ ...ctl, cursor: "pointer", color: C.warn }} onClick={resetFilters}>reset {activeFilters} filter{activeFilters > 1 ? "s" : ""}</button>}
-        <span style={{ fontSize: fs(10.5), color: C.faint }}>{sorted.length} shown</span>
+        <FilterPills pills={pills} onClear={() => { resetFilters(); setShowPost(false); }} />
       </div>
 
       {q.isError ? (
         <div role="alert" style={{ color: C.danger, fontSize: fs(12) }}>{String(q.error)}</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 370px) 1fr", gap: 12 }}>
-          <div style={{ ...PANEL(), maxHeight: 640, overflowY: "auto" }}>
+        <div className="bdr-split">
+          <div className="bdr-list" style={{ ...PANEL(), overflowY: "auto", overscrollBehavior: "contain" }}>
             {firstLoad ? (
-              <div style={{ padding: 12 }}>
-                {Array.from({ length: 8 }).map((_, i) => <div key={i} className="animate-pulse" style={{ height: 46, background: C.surfaceAlt, borderRadius: UI.radius2, marginBottom: 8 }} />)}
-              </div>
+              <LoadingMon bdr={acting} ob={false} label="Searching the tall grass for leads" />
             ) : sorted.length === 0 ? (
-              <div style={{ padding: 16, fontSize: fs(12), color: C.muted }}>Nothing here. {bucket === "active" ? "Queue clear — nice." : ""}</div>
-            ) : sorted.slice(0, shown).map((r) => {
-              const on = current?.contact_id === r.contact_id;
-              const lead = r.unhandled[0]?.sig ?? r.signals[0]?.sig ?? "";
-              const d = daysSince(r.last_touch);
-              return (
-                <div key={r.contact_id} onClick={() => setSelected(r.contact_id)} style={{
-                  padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
-                  borderLeft: `3px solid ${on ? (UI.game ? C.accent : sigMeta(lead).color) : "transparent"}`, background: on ? (UI.game ? C.accentDim : C.surfaceAlt) : "transparent",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ fontSize: fs(12.5), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      <input type="checkbox" checked={draftIds.has(r.contact_id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleDraft(r)} title="Select for AI draft" style={{ marginRight: 6, verticalAlign: "middle", cursor: "pointer" }} />{multiOwner && <span style={{ fontSize: fs(9.5), color: C.page, background: r.queue_owner_id === acting ? C.accent : C.muted, borderRadius: 3, padding: "0 4px", marginRight: 6 }}>{initials(bdrName(r.queue_owner_id))}</span>}
-                      {UI.game && on ? "▶ " : ""}{r.contact_name || r.email}
-                    </span>
-                    <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
-                      <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title="Open in HubSpot (h)" style={miniLink("#ff7a59")}>HS</a>
-                      {r.linkedin_url
-                        ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} title="Open LinkedIn (l)" style={miniLink("#5fb3ff")}><Linkedin size={10} /></a>
-                        : <span title="No LinkedIn on file" style={{ ...miniLink(C.faint), opacity: 0.35, cursor: "default" }}><Linkedin size={10} /></span>}
-                      <LiBadge li={liInfo(r.ov, r.hs_li)} />
-                      <span style={{ fontSize: fs(10), color: d == null || d > 7 ? C.danger : C.faint }}>{d == null ? "untouched" : `${d}d`}</span>
-                    </span>
-                  </div>
-                  <div style={{ fontSize: fs(10.5), color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: "2px 0 5px" }}>
-                    {r.company || "—"} · created {fmtAgo(r.created)}
-                    {r.last_by && r.last_by_id !== r.queue_owner_id ? ` · last: ${r.last_by}` : ""}
-                    {r.ov?.retouch_on ? ` · ↻ ${r.ov.retouch_on}` : ""}
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {r.signals.slice(0, 3).map((s) => <SignalTag key={s.sig} s={s} />)}
-                    {r.signals.length > 3 && <span style={{ fontSize: fs(10), color: C.faint }}>+{r.signals.length - 3}</span>}
-                  </div>
-                </div>
-              );
-            })}
+              pills.length
+                ? <EmptyMon bdr={acting} ob={false} title="No wild leads here!">Nothing matches these filters. <button type="button" onClick={() => { resetFilters(); setShowPost(false); }} style={{ border: "none", background: "transparent", color: C.accent, cursor: "pointer", fontWeight: 600, fontSize: "inherit", padding: 0 }}>Clear all filters</button></EmptyMon>
+                : <EmptyMon bdr={acting} ob={false} title={bucket === "active" ? "Queue clear!" : "No wild leads here!"}>{bucket === "active" ? "Every live signal has been answered. Nice work." : "Nothing in this bucket right now."}</EmptyMon>
+            ) : sorted.slice(0, shown).map((r) => (
+              <FeedRow key={r.contact_id} r={r} on={current?.contact_id === r.contact_id} drafted={draftIds.has(r.contact_id)} multiOwner={multiOwner} accent={UI.trainer}
+                onSelect={onSelectRow} onToggleDraft={onToggleDraftRow} />
+            ))}
             {!firstLoad && sorted.length > shown && (
               <button onClick={() => setShown(shown + 50)} style={{ ...btn(C.accent), margin: 10, width: "calc(100% - 20px)", justifyContent: "center" }}>
                 Show 50 more ({sorted.length - shown} left)
               </button>
             )}
           </div>
-          <div style={{ position: "sticky", top: 8, alignSelf: "start" }}>
-            {firstLoad ? <div className="animate-pulse" style={{ height: 460, background: C.surface, borderRadius: UI.radius }} />
-              : current ? <Card key={current.contact_id} r={current} acting={acting} busy={busy} onAct={(t, x) => act(current, t, x)} runMsg={aq.msg} />
-              : <div style={{ fontSize: fs(12), color: C.muted }}>Select a contact.</div>}
+          <div className="bdr-detail" style={{ minWidth: 0 }}>
+            {firstLoad ? <div style={{ ...PANEL() }}><LoadingMon bdr={acting} ob={false} label="Getting the contact card ready" rows={4} rowH={90} /></div>
+              : current ? <Card key={current.contact_id} r={current} acting={acting} busy={busy} onAct={(t, x) => act(current, t, x)} runMsg={aq.msg} pendingKeys={aq.pendingKeys} stuck={aq.stuck} onRetry={aq.retry} />
+              : sorted.length ? <div style={{ ...PANEL() }}><EmptyMon bdr={acting} ob={false} title="Pick a lead">Choose a contact on the left to see their card.</EmptyMon></div> : null}
           </div>
         </div>
       )}
 
-      <div style={{ fontSize: fs(10), color: C.faint, marginTop: 12, lineHeight: 1.6 }}>
+      <Expander id="feed-help" title="How this feed works">
+      <div style={{ fontSize: fs(UI.game ? 12 : 10), color: C.faint, lineHeight: 1.7 }}>
         <div>Signals look back 30 days; "Active" = signal ≤14d with no touch since.</div>
         <div>Last touch = latest email/call/meeting by anyone (BDR, AE, CE) + LinkedIn logged here.</div>
         <div>HubSpot syncs ~every 4h, usage/AWR nightly.</div>
         <div>Actions apply instantly and save in batches via the bdr_terminal_log_action Flight (MotherDuck only, never HubSpot); only the queue owner can write.</div>
         <div>Post-SQA = the contact or its company has an SQA (BDR Terminal rules) that is open, won, or lost in the last 180 days; older closed-lost SQAs recycle back into the queue.</div>
       </div>
+      </Expander>
     </div>
   );
 }
@@ -3608,22 +4253,23 @@ export default function BdrTerminal() {
   const [uiSize, setUiSize] = useDiveState<string>("uiSize", "m");
   const [showSettings, setShowSettings] = useState(false);
   applyTheme(theme === "terminal" ? "terminal" : "unova", uiSize);
+  UI.trainer = trainerOf(acting).color;
   const game = UI.game;
   const me = bdrName(acting);
   const TABS: [string, string, string][] = [["feed", "▤ SIGNAL FEED", "INBOUND"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
-  const wrap: any = { padding: 18, background: game ? "transparent" : C.page, color: C.text };
+  const wrap: any = { background: game ? "transparent" : C.page, color: C.text };
   const rivet = (pos: any): any => ({ position: "absolute", width: 8, height: 8, borderRadius: 999, background: "#5fb3e6", boxShadow: "inset -1px -1px 0 #0a3550", ...pos });
   return (
-    <div className="bdr-root" style={{ background: UI.bg, minHeight: "100%", color: C.text, fontFamily: UI.body }}>
+    <div className="bdr-root" style={{ background: UI.bg, minHeight: "100vh", color: C.text, fontFamily: UI.body, ["--bdr-hover" as any]: game ? "#f4f7fb" : "#1b241f" }}>
       <style>{FONT_CSS}</style>
       {game && (tab === "feed" || tab === "outbound") && <TrainingShowcase bdr={acting} ob={tab === "outbound"} />}
       <div style={{ position: "relative", display: "flex", gap: game ? 8 : 2, padding: game ? "14px 18px 0" : "10px 18px 0", background: game ? "transparent" : C.page, alignItems: "center", flexWrap: "wrap" }}>
         {TABS.map(([id, label, short]) => {
           const on = tab === id;
           return game ? (
-            <button key={id} onClick={() => setTab(id)} style={{ padding: "7px 16px", fontFamily: UI.body, fontSize: fs(13), fontWeight: 700, cursor: "pointer", letterSpacing: 1,
-              border: "2px solid #484848", borderRadius: 6, background: on ? "#3878c8" : "#ffffff", color: on ? "#ffffff" : "#303030",
-              boxShadow: on ? "inset 0 -3px 0 #2858a0" : "inset 0 -3px 0 #d0d0d0" }}>{on ? "▶ " : ""}{short}</button>
+            <button key={id} onClick={() => setTab(id)} aria-current={on ? "page" : undefined} style={{ padding: "7px 16px", minHeight: 40, fontFamily: UI.body, fontSize: fs(13), fontWeight: 700, cursor: "pointer", letterSpacing: 1,
+              border: "2px solid #484848", borderRadius: 8, background: on ? UI.trainer : "#ffffff", color: on ? inkOn(UI.trainer) : "#303030",
+              boxShadow: on ? `inset 0 -3px 0 ${shade(UI.trainer, 0.3)}` : "inset 0 -3px 0 #d0d0d0" }}>{on ? "▶ " : ""}{short}</button>
           ) : (
             <button key={id} onClick={() => setTab(id)} style={{
               padding: "6px 14px", fontSize: fs(11.5), fontFamily: UI.body, cursor: "pointer", letterSpacing: 1,
@@ -3639,13 +4285,13 @@ export default function BdrTerminal() {
         {showSettings && <SettingsPanel theme={theme} setTheme={setTheme} size={uiSize} setSize={setUiSize} onClose={() => setShowSettings(false)} />}
       </div>
       {tab === "trainer"
-        ? <div style={wrap}><TrainerTab defaultTrainer={acting} /></div>
+        ? <div className="bdr-page" style={wrap}><TrainerTab defaultTrainer={acting} /></div>
         : tab === "drafts"
-        ? <div style={wrap}><DraftsTab /></div>
+        ? <div className="bdr-page" style={wrap}><DraftsTab /></div>
         : tab === "outbound"
         ? <OutboundFeed />
         : tab === "league"
-        ? <div style={wrap}><LeagueTab /></div>
+        ? <div className="bdr-page" style={wrap}><LeagueTab /></div>
         : <SignalFeed />}
     </div>
   );
