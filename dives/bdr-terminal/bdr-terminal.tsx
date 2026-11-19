@@ -1,8 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSQLQuery, useDiveState, useRunFlight, useFlightRun } from "@motherduck/react-sql-query";
 import {
   ExternalLink, Linkedin, Search, AlertTriangle, Mail, TrendingUp, CalendarPlus, Coins, Rocket, Clock,
-  Sparkles, Check, RotateCcw, ChevronDown, StickyNote, ArrowUpDown, X, Lock, Hand, Ticket, RefreshCw, BookOpen, Loader2,
+  Sparkles, Check, RotateCcw, ChevronDown, StickyNote, ArrowUpDown, X, Lock, Hand, Ticket, RefreshCw, BookOpen, Loader2, SlidersHorizontal,
 } from "lucide-react";
 
 export const REQUIRED_DATABASES = [{ type: 'share', path: 'md:_share/mdw/8cdbf94d-7075-45a4-bf57-4fd19470e532', alias: 'mdw' }, { type: 'share', path: 'md:_share/bdr_terminal_gamified/51f8608a-6641-4fde-8847-b2c6bde9f34e', alias: 'bdr_terminal_gamified' }];
@@ -129,6 +129,20 @@ const CHIPS: [string, string][] = [
   ["Trial extension", "#ffd43b"], ["Converted", "#69db7c"], ["Onboarding booked", "#b197fc"], ["High AWR", "#38d9a9"],
   ["Business offer request", "#e03131"], ["Hand-raiser", "#ff4d94"], ["Event", "#4dabf7"], ["Reactivation", "#e599f7"], ["Content download", "#c0eb75"],
 ];
+
+const SORT_OPTS: [string, string][] = [
+  ["priority", "Priority"], ["signal_new", "Newest signal"], ["stale", "Longest since touch"], ["created_new", "Created: newest"],
+  ["created_old", "Created: oldest"], ["stl", "Slowest speed-to-lead"], ["touches", "Fewest touches (14d)"], ["awr", "AWR"],
+  ["cpu", "CPU 7d"], ["trial_end", "Trial ending soonest"], ["owner", "Queue owner"], ["company", "Company A–Z"],
+];
+const TOUCHED_OPTS: [string, string][] = [["any", "anyone"], ["me", "me (acting)"], ["owner", "queue owner"], ["other_bdr", "another BDR"], ["ae", "AE / non-BDR"], ["never", "never touched"]];
+const FRESH_OPTS: [string, string][] = [["any", "any"], ["never", "never touched"], ["gt3", "> 3d since touch"], ["gt7", "> 7d since touch"], ["le7", "touched ≤ 7d"]];
+const OPENED_OPTS: [string, string][] = [["any", "any"], ["since_touch", "since our last touch"], ["le1", "≤ 1d ago"], ["le3", "≤ 3d ago"], ["le7", "≤ 7d ago"], ["clicked", "clicked since last touch"], ["never", "never opened"]];
+const CREATED_OPTS: [string, string][] = [["any", "any time"], ["1", "≤ 1d"], ["3", "≤ 3d"], ["7", "≤ 7d"], ["30", "≤ 30d"], ["90", "≤ 90d"]];
+const PAGE_OPTS = ["Pricing", "Docs", "Product", "Blog", "Trial / ad landing", "Books / courses", "Events", "Contact / customers", "Homepage", "Careers"];
+const toOpts = (a: [string, string][]): DOpt[] => a.map(([v, label]) => ({ v, label }));
+const optLabel = (a: [string, string][], v: string) => a.find((x) => x[0] === v)?.[1] ?? v;
+const bdrOpt = (b: { id: string; name: string }): DOpt => ({ v: b.id, label: b.name, sprite: { map: lineFor(b.id, false)[0].map, pal: palOf(b.id, false, false) } });
 
 const BUCKETS: { id: string; label: string; hint: string }[] = [
   { id: "active", label: "Active", hint: "Live signal not yet answered by any touch" },
@@ -893,19 +907,6 @@ function CommandMenu({ prompt, items }: { prompt: any; items: { label: string; c
   );
 }
 
-function Chip({ label, color, count, active, onClick }: any) {
-  return (
-    <button onClick={onClick} style={{
-      display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 9px", borderRadius: 999, fontSize: fs(11),
-      fontFamily: "inherit", cursor: "pointer", border: UI.game ? `2px solid ${active ? "#3878c8" : "#b8b8b8"}` : `1px solid ${active ? color : C.border}`,
-      background: UI.game ? (active ? "#dce8f8" : "#ffffff") : active ? `${color}22` : C.surface, color: UI.game ? C.text : active ? color : C.muted,
-    }}>
-      <span style={{ width: 7, height: 7, borderRadius: 999, background: color }} />
-      {label} <b style={{ color: C.text }}>{count}</b>
-    </button>
-  );
-}
-
 // Signal type tag: the signal's color as a tint + icon, readable ink. big = the contact's top signal.
 function SignalTag({ s, dim, big }: { s: Sig | string; dim?: boolean; big?: boolean }) {
   const name = typeof s === "string" ? s : s.sig;
@@ -980,63 +981,6 @@ function Expander({ id, title, summary, defaultOpen = false, children }: { id: s
   );
 }
 
-function BdrMultiSelect({ selected, onChange }: { selected: string[]; onChange: (v: string[]) => void }) {
-  const [open, setOpen] = useState(false);
-  const all = selected.length === BDRS.length;
-  const label = all ? "All BDRs" : selected.length === 1 ? bdrName(selected[0]) : `${selected.length} BDRs`;
-  const toggle = (id: string) => {
-    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
-    onChange(next.length ? next : [id]);
-  };
-  return (
-    <div style={{ position: "relative" }}>
-      <button onClick={() => setOpen(!open)} style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-        Queues: <b>{label}</b> <ChevronDown size={12} />
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "110%", right: 0, zIndex: 20, background: C.surface, border: `1px solid ${C.border}`,
-          borderRadius: UI.radius, padding: 8, minWidth: 210, boxShadow: "0 6px 20px rgba(0,0,0,.5)" }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <button style={{ ...ctl, cursor: "pointer", flex: 1 }} onClick={() => onChange(BDRS.map((b) => b.id))}>All BDRs</button>
-            <button style={{ ...ctl, cursor: "pointer" }} onClick={() => setOpen(false)}><X size={12} /></button>
-          </div>
-          {BDRS.map((b) => (
-            <label key={b.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: fs(12), padding: "4px 2px", cursor: "pointer", color: C.text }}>
-              <input type="checkbox" checked={selected.includes(b.id)} onChange={() => toggle(b.id)} />
-              {b.name}
-              <span onClick={(e) => { e.preventDefault(); onChange([b.id]); }} style={{ marginLeft: "auto", fontSize: fs(10), color: C.accent, cursor: "pointer" }}>only</span>
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function MultiPick({ label, options, selected, onChange }: { label: string; options: string[]; selected: string[]; onChange: (v: string[]) => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div style={{ position: "relative" }}>
-      <button onClick={() => setOpen(!open)} style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: selected.length ? C.accent : C.text }}>
-        {label}: <b>{selected.length ? selected.join(", ") : "any"}</b> <ChevronDown size={12} />
-      </button>
-      {open && (
-        <div style={{ position: "absolute", top: "110%", left: 0, zIndex: 20, ...PANEL(), padding: 8, minWidth: 200, boxShadow: "0 6px 20px rgba(0,0,0,.5)" }}>
-          <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
-            <button style={{ ...ctl, cursor: "pointer", flex: 1 }} onClick={() => onChange([])}>any</button>
-            <button style={{ ...ctl, cursor: "pointer" }} onClick={() => setOpen(false)}><X size={12} /></button>
-          </div>
-          {options.map((o) => (
-            <label key={o} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: fs(12), padding: "3px 2px", cursor: "pointer", color: C.text }}>
-              <input type="checkbox" checked={selected.includes(o)} onChange={() => onChange(selected.includes(o) ? selected.filter((x) => x !== o) : [...selected, o])} /> {o}
-            </label>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function Select({ value, onChange, options, label }: { value: string; onChange: (v: string) => void; options: [string, string][]; label: string }) {
   return (
     <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(10.5), color: C.faint }}>
@@ -1044,6 +988,157 @@ function Select({ value, onChange, options, label }: { value: string; onChange: 
       <select value={value} onChange={(e) => onChange(e.target.value)} style={{ ...ctl, cursor: "pointer", padding: "4px 6px" }}>
         {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
       </select>
+    </label>
+  );
+}
+
+// ---- Filter controls: one dropdown component for every filter (single or multi-select) ----
+// Counts are computed lazily (only while the menu is open) from the rows that match every *other* active filter.
+type DOpt = { v: string; label: string; color?: string; hint?: string; sprite?: { map: string[]; pal: any } };
+let ddSeq = 0;
+function useDismiss(ref: any, open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+}
+const ddButton = (active: boolean): any => ({
+  ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap", maxWidth: "100%",
+  ...(active ? { borderColor: C.accent, background: C.accentDim, color: UI.game ? "#1d4f8f" : C.accent } : {}),
+});
+const DDBlock = createContext(false); // inside "All filters": dropdowns fill their grid cell
+function Dropdown({ label, options, value, onChange, multi, values, onChangeMulti, counts, isDefault, align = "left", onOnly, display, menuWidth = 260, hideLabel }: {
+  label: string; options: DOpt[]; value?: string; onChange?: (v: string) => void;
+  multi?: boolean; values?: string[]; onChangeMulti?: (v: string[]) => void;
+  counts?: () => Record<string, number>; isDefault?: boolean; align?: "left" | "right"; onOnly?: (v: string) => void; display?: string; menuWidth?: number; hideLabel?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hi, setHi] = useState(0);
+  const wrap = useRef<HTMLDivElement | null>(null);
+  const list = useRef<HTMLDivElement | null>(null);
+  const btnRef = useRef<HTMLButtonElement | null>(null);
+  const id = useMemo(() => `dd${++ddSeq}`, []);
+  useDismiss(wrap, open, () => setOpen(false));
+  const sel = multi ? (values ?? []) : [value ?? ""];
+  const n = open && counts ? counts() : null;
+  const cur = options.find((o) => o.v === value);
+  const shown = display ?? (multi ? (sel.length === 0 ? "any" : sel.length === 1 ? (options.find((o) => o.v === sel[0])?.label ?? sel[0]) : `${sel.length} selected`) : (cur?.label ?? value ?? ""));
+  const active = isDefault === undefined ? (multi ? sel.length > 0 : false) : !isDefault;
+  const openMenu = () => { setHi(Math.max(0, options.findIndex((o) => sel.includes(o.v)))); setOpen(true); setTimeout(() => list.current?.focus(), 0); };
+  const pick = (o: DOpt) => {
+    if (multi) onChangeMulti?.(sel.includes(o.v) ? sel.filter((x) => x !== o.v) : [...sel, o.v]);
+    else { onChange?.(o.v); setOpen(false); btnRef.current?.focus(); }
+  };
+  const onKey = (e: any) => {
+    e.stopPropagation(); // keep the feed's j/k/r shortcuts out of open menus
+    if (e.key === "ArrowDown") { e.preventDefault(); setHi((h) => Math.min(options.length - 1, h + 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setHi((h) => Math.max(0, h - 1)); }
+    else if (e.key === "Home") { e.preventDefault(); setHi(0); }
+    else if (e.key === "End") { e.preventDefault(); setHi(options.length - 1); }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const o = options[hi]; if (o) pick(o); }
+    else if (e.key === "Escape") { e.preventDefault(); setOpen(false); btnRef.current?.focus(); }
+    else if (e.key === "Tab") setOpen(false);
+  };
+  useEffect(() => { if (open) document.getElementById(`${id}-o${hi}`)?.scrollIntoView({ block: "nearest" }); }, [hi, open]);
+  const block = useContext(DDBlock);
+  return (
+    <div ref={wrap} data-bdr-menu="1" style={{ position: "relative", maxWidth: "100%", ...(block ? { width: "100%" } : {}) }}>
+      <button ref={btnRef} type="button" aria-haspopup="listbox" aria-expanded={open} onClick={() => (open ? setOpen(false) : openMenu())}
+        onKeyDown={(e) => { if (!open && (e.key === "ArrowDown" || e.key === "ArrowUp")) { e.preventDefault(); e.stopPropagation(); openMenu(); } }}
+        style={{ ...ddButton(active), ...(block ? { width: "100%", justifyContent: "space-between" } : {}) }}>
+        {!hideLabel && <span style={{ color: active ? "inherit" : C.faint, fontWeight: 500, ...(block ? { marginRight: "auto" } : {}) }}>{label}</span>}
+        <b style={{ fontWeight: 650, overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{shown}</b>
+        <ChevronDown size={14} style={{ flexShrink: 0, transform: open ? "rotate(180deg)" : "none", transition: "transform .12s" }} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 6px)", [align]: 0, zIndex: 40, width: menuWidth, maxWidth: "calc(100vw - 32px)", background: C.surface,
+          border: `1px solid ${C.border}`, borderRadius: UI.radius, boxShadow: "0 10px 30px rgba(16,24,40,.16)", overflow: "hidden" }}>
+          {multi && (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: `${SP.sm}px ${SP.md}px`, borderBottom: `1px solid ${C.border}`, fontSize: fs(12), color: C.faint }}>
+              <span>{label}{sel.length ? ` · ${sel.length} selected` : ""}</span>
+              <button type="button" onClick={() => onChangeMulti?.([])} disabled={!sel.length} style={{ border: "none", background: "transparent", color: sel.length ? C.accent : C.faint, cursor: sel.length ? "pointer" : "default", fontSize: fs(12), fontWeight: 600, minHeight: 28 }}>Clear</button>
+            </div>
+          )}
+          <div ref={list} role="listbox" aria-label={label} aria-multiselectable={multi || undefined} tabIndex={-1} aria-activedescendant={`${id}-o${hi}`} onKeyDown={onKey}
+            style={{ maxHeight: 340, overflowY: "auto", padding: SP.xs, outline: "none" }}>
+            {options.map((o, i) => {
+              const on = sel.includes(o.v);
+              const c = n ? n[o.v] : undefined;
+              return (
+                <div key={o.v} id={`${id}-o${i}`} role="option" aria-selected={on} title={o.hint} onMouseEnter={() => setHi(i)} onClick={() => pick(o)}
+                  style={{ display: "flex", alignItems: "center", gap: SP.sm, minHeight: TAP, padding: `0 ${SP.sm}px`, borderRadius: UI.radius2, cursor: "pointer",
+                    background: i === hi ? C.accentDim : "transparent", fontSize: fs(13), color: c === 0 && !on ? C.faint : C.text }}>
+                  {multi
+                    ? <span style={{ width: 16, height: 16, borderRadius: 4, border: `1.5px solid ${on ? C.accent : C.border}`, background: on ? C.accent : C.surface, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{on && <Check size={12} color="#fff" />}</span>
+                    : <span style={{ width: 16, display: "inline-flex", justifyContent: "center", flexShrink: 0 }}>{on && <Check size={14} color={C.accent} />}</span>}
+                  {o.sprite && <span style={{ width: 24, height: 24, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Sprite map={o.sprite.map} pal={o.sprite.pal} h={24} /></span>}
+                  {o.color && <span style={{ width: 9, height: 9, borderRadius: 999, background: o.color, flexShrink: 0 }} />}
+                  <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontWeight: on ? 650 : 400 }}>{o.label}</span>
+                  {onOnly && <button type="button" onClick={(e) => { e.stopPropagation(); onOnly(o.v); setOpen(false); }} style={{ border: "none", background: "transparent", color: C.accent, fontSize: fs(11.5), cursor: "pointer", padding: "0 4px" }}>only</button>}
+                  {c !== undefined && <span style={{ fontSize: fs(12), color: C.faint, fontVariantNumeric: "tabular-nums" }}>{c}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// "All filters" popover: the less-used filters, each one a Dropdown
+function FilterPopover({ n, children }: { n: number; children: any }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement | null>(null);
+  useDismiss(wrap, open, () => setOpen(false));
+  return (
+    <div ref={wrap} data-bdr-menu="1" style={{ position: "relative" }} onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } }}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen(!open)} style={ddButton(n > 0)}>
+        <SlidersHorizontal size={14} /> All filters{n ? ` (${n})` : ""}
+      </button>
+      {open && (
+        <div role="dialog" aria-label="All filters" style={{ position: "absolute", top: "calc(100% + 6px)", right: 0, zIndex: 35, width: 560, maxWidth: "calc(100vw - 32px)",
+          background: C.surface, border: `1px solid ${C.border}`, borderRadius: UI.radius, boxShadow: "0 10px 30px rgba(16,24,40,.16)", padding: SP.lg }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: SP.md }}>
+            <b style={{ fontSize: fs(14) }}>All filters</b>
+            <button type="button" onClick={() => setOpen(false)} aria-label="Close" style={{ ...ctl, minHeight: 28, padding: "2px 8px", cursor: "pointer" }}><X size={14} /></button>
+          </div>
+          <DDBlock.Provider value={true}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: SP.sm }}>{children}</div>
+          </DDBlock.Provider>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Active filters as removable pills, plus Clear all
+function FilterPills({ pills, onClear }: { pills: { k: string; label: string; color?: string; onRemove: () => void }[]; onClear: () => void }) {
+  if (!pills.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center", marginTop: SP.md }}>
+      {pills.map((p) => (
+        <span key={p.k} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "0 4px 0 10px", minHeight: 30, borderRadius: 999, fontSize: fs(12.5),
+          background: p.color ? `${p.color}22` : C.accentDim, border: `1px solid ${p.color ? p.color + "99" : C.accent + "55"}`, color: p.color ? shade(p.color, 0.45) : C.text, fontWeight: 600 }}>
+          {p.color && <span style={{ width: 8, height: 8, borderRadius: 999, background: p.color }} />}
+          {p.label}
+          <button type="button" onClick={p.onRemove} aria-label={`Remove filter ${p.label}`} style={{ border: "none", background: "transparent", cursor: "pointer", color: "inherit", width: 24, height: 24, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center" }}><X size={13} /></button>
+        </span>
+      ))}
+      <button type="button" onClick={onClear} style={{ border: "none", background: "transparent", color: C.accent, cursor: "pointer", fontSize: fs(12.5), fontWeight: 600, minHeight: TAP, padding: "0 4px" }}>Clear all</button>
+    </div>
+  );
+}
+// Search box that matches the filter controls
+function SearchBox({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  return (
+    <label style={{ ...ctl, display: "flex", alignItems: "center", gap: SP.sm, flex: "1 1 220px", minWidth: 0, maxWidth: 360, cursor: "text" }}>
+      <Search size={14} color={C.faint} />
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label="Search"
+        style={{ background: "transparent", color: C.text, border: "none", outline: "none", fontSize: fs(13), fontFamily: "inherit", flex: 1, minWidth: 0 }} />
+      {value && <button type="button" onClick={() => onChange("")} aria-label="Clear search" style={{ border: "none", background: "transparent", cursor: "pointer", color: C.faint, display: "inline-flex" }}><X size={14} /></button>}
     </label>
   );
 }
@@ -3216,22 +3311,29 @@ function OutboundFeed() {
   };
 
   const aeLabel = (a: ObAccount) => a.ae_id ? (aeName(a.ae_id) || a.hs_ae_name || `Owner ${a.ae_id}`) : "Unassigned";
-  const scoped = accounts.filter((a) => showPost || !a.post_sqa);
+  const scoped = useMemo(() => accounts.filter((a) => showPost || !a.post_sqa), [accounts, showPost]);
   const counts = useMemo(() => { const m: Record<string, number> = { all: scoped.length }; for (const a of scoped) m[a.bucket] = (m[a.bucket] ?? 0) + 1; return m; }, [scoped]);
   const aeOpts = useMemo(() => Array.from(new Set(scoped.map((a) => a.ae_id).filter(Boolean))).map((id) => [id, aeName(id) || scoped.find((a) => a.ae_id === id)?.hs_ae_name || id] as [string, string]).sort((x, y) => x[1].localeCompare(y[1])), [scoped, pods]);
   const segOpts = useMemo(() => Array.from(new Set(scoped.map((a) => a.segment).filter(Boolean))).sort(), [scoped]);
   const playOpts = useMemo(() => Array.from(new Set(scoped.map((a) => a.play).filter(Boolean))).sort(), [scoped]);
   const needle = search.trim().toLowerCase();
-  const rows = scoped.filter((a) => {
-    if (bucket !== "all" && a.bucket !== bucket) return false;
-    if (aeFilter === "unassigned" && a.ae_id) return false;
-    if (aeFilter !== "any" && aeFilter !== "unassigned" && a.ae_id !== aeFilter) return false;
-    if (segFilter !== "any" && a.segment !== segFilter) return false;
-    if (playFilter !== "any" && a.play !== playFilter) return false;
-    if (obLiF !== "any" && !a.contacts.some((c) => liMatches(obLiF, liInfo(c.ov, c.hs_li)))) return false;
-    if (!needle) return true;
-    return [a.company, a.domain, aeLabel(a), ...a.contacts.map((c) => `${c.contact_name} ${c.email} ${c.title}`)].some((v) => (v || "").toLowerCase().includes(needle));
-  }).sort((x, y) => {
+  // same rules as before, as predicate builders so dropdowns can show live counts
+  const FXo: Record<string, (v: any) => ((a: ObAccount) => boolean) | null> = {
+    ae: (v: string) => (v === "any" ? null : v === "unassigned" ? (a) => !a.ae_id : (a) => a.ae_id === v),
+    seg: (v: string) => (v === "any" ? null : (a) => a.segment === v),
+    play: (v: string) => (v === "any" ? null : (a) => a.play === v),
+    li: (v: string) => (v === "any" ? null : (a) => a.contacts.some((c) => liMatches(v, liInfo(c.ov, c.hs_li)))),
+    search: (v: string) => (v ? (a) => [a.company, a.domain, aeLabel(a), ...a.contacts.map((c) => `${c.contact_name} ${c.email} ${c.title}`)].some((x) => (x || "").toLowerCase().includes(v)) : null),
+  };
+  const ofs: Record<string, any> = { ae: aeFilter, seg: segFilter, play: playFilter, li: obLiF, search: needle };
+  const opreds = Object.entries(ofs).map(([k, v]) => [k, FXo[k](v)] as [string, ((a: ObAccount) => boolean) | null]).filter(([, p]) => p) as [string, (a: ObAccount) => boolean][];
+  const oPass = (a: ObAccount, except: string) => opreds.every(([k, p]) => k === except || p(a));
+  const inObBucket = useMemo(() => scoped.filter((a) => bucket === "all" || a.bucket === bucket), [scoped, bucket]);
+  const oCounts = (key: string, opts: string[]) => {
+    const base = inObBucket.filter((a) => oPass(a, key));
+    return Object.fromEntries(opts.map((v) => { const pr = FXo[key](v); return [v, pr ? base.filter(pr).length : base.length]; }));
+  };
+  const rows = useMemo(() => inObBucket.filter((a) => oPass(a, "")).sort((x, y) => {
     switch (sortBy) {
       case "stale": return (x.last_touch ?? 0) - (y.last_touch ?? 0);
       case "recent": return (y.last_touch ?? 0) - (x.last_touch ?? 0);
@@ -3240,7 +3342,19 @@ function OutboundFeed() {
       case "segment": { const rk: any = { ENT: 0, MM: 1, SMB: 2, Micro: 3 }; return (rk[x.segment] ?? 9) - (rk[y.segment] ?? 9); }
       default: return x.prio - y.prio;
     }
-  });
+  }), [inObBucket, JSON.stringify(ofs), sortBy, pods]);
+  const OB_SORT: [string, string][] = [["priority", "Priority"], ["stale", "Longest since touch"], ["recent", "Most recently touched"], ["contacts", "Most contacts"], ["segment", "Segment (ENT→Micro)"], ["company", "Company A–Z"]];
+  const aeOptList: DOpt[] = [{ v: "any", label: "any" }, { v: "unassigned", label: "Unassigned" }, ...aeOpts.map(([v, label]) => ({ v, label }))];
+  const obMore = (aeFilter !== "any" ? 1 : 0) + (segFilter !== "any" ? 1 : 0) + (playFilter !== "any" ? 1 : 0) + (obLiF !== "any" ? 1 : 0) + (showPost ? 1 : 0);
+  const obPills = [
+    ...(search ? [{ k: "q", label: `Search: "${search}"`, onRemove: () => setSearch("") }] : []),
+    ...(aeFilter !== "any" ? [{ k: "ae", label: `AE: ${aeOptList.find((o) => o.v === aeFilter)?.label ?? aeFilter}`, onRemove: () => setAeFilter("any") }] : []),
+    ...(segFilter !== "any" ? [{ k: "seg", label: `Segment: ${segFilter}`, onRemove: () => setSegFilter("any") }] : []),
+    ...(playFilter !== "any" ? [{ k: "play", label: `Play: ${playFilter}`, onRemove: () => setPlayFilter("any") }] : []),
+    ...(obLiF !== "any" ? [{ k: "li", label: `LinkedIn: ${optLabel(LI_FILTER_OPTS, obLiF)}`, onRemove: () => setObLiF("any") }] : []),
+    ...(showPost ? [{ k: "ps", label: "Post-SQA included", onRemove: () => setShowPost(false) }] : []),
+  ];
+  const obClear = () => { setSearch(""); setAeFilter("any"); setSegFilter("any"); setPlayFilter("any"); setObLiF("any"); setShowPost(false); };
   const cur = rows.find((a) => a.company_id === selected) ?? rows[0];
   const loading = !accounts.length && (q.isLoading || ovQ.isLoading);
   const [obShown, setObShown] = useState(50);
@@ -3251,10 +3365,10 @@ function OutboundFeed() {
   };
 
   return (
-    <div style={{ background: UI.game ? "transparent" : C.page, color: C.text, padding: 18, fontFamily: UI.body }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+    <div className="bdr-page" style={{ background: UI.game ? "transparent" : C.page, color: C.text, fontFamily: UI.body }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: SP.md, marginBottom: SP.lg }}>
         <div>
-          <div style={{ fontSize: fs(10), letterSpacing: 2, color: C.accent }}>BDR TERMINAL // OUTBOUND</div>
+          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: C.accent, fontWeight: 600 }}>BDR TERMINAL // OUTBOUND</div>
           <PageTitle text="Accounts" />
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {loading ? "loading…" : `${scoped.length} accounts · ${scoped.reduce((n, a) => n + a.contacts.length, 0)} Apollo contacts · ${counts.hot ?? 0} hot · ${counts.followup ?? 0} need follow-up`}
@@ -3269,38 +3383,30 @@ function OutboundFeed() {
           {counts.hot ?? 0} account{(counts.hot ?? 0) === 1 ? " is" : "s are"} heating up! {counts.followup ?? 0} need a follow-up{counts.retouch_due ? `, ${counts.retouch_due} retouch${counts.retouch_due > 1 ? "es" : ""} due` : ""}. Where will you go?
         </DialogBox>
       )}
-      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 10, flexWrap: "wrap" }}>
-        {OB_BUCKETS.map((b) => {
-          const on = bucket === b.id;
-          return (
-            <button key={b.id} title={b.hint} onClick={() => { setBucket(b.id); setSelected(null); }} style={{ padding: "6px 12px", fontSize: fs(11.5), fontFamily: "inherit", cursor: "pointer", border: "none",
-              borderBottom: `2px solid ${on ? C.accent : "transparent"}`, background: "transparent", color: on ? C.accent : C.muted, fontWeight: on ? 700 : 400 }}>
-              {b.label} <span style={{ color: on ? C.text : C.faint }}>{counts[b.id] ?? 0}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 12 }}>
-        <div style={{ ...ctl, display: "flex", alignItems: "center", gap: 6, padding: "4px 8px" }}>
-          <Search size={12} color={C.faint} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="company, domain, person, title, AE"
-            style={{ background: "transparent", color: C.text, border: "none", outline: "none", fontSize: fs(11.5), fontFamily: "inherit", width: 190 }} />
+      <div style={{ ...PANEL(), padding: SP.md, marginBottom: SP.lg }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center" }}>
+          <SearchBox value={search} onChange={setSearch} placeholder="Company, domain, person, title, AE" />
+          <Dropdown label="Bucket" options={OB_BUCKETS.map((b) => ({ v: b.id, label: b.label, hint: b.hint }))} value={bucket} isDefault={bucket === "hot"}
+            onChange={(v) => { setBucket(v); setSelected(null); }}
+            counts={() => { const m: Record<string, number> = Object.fromEntries(OB_BUCKETS.map((b) => [b.id, 0])); const base = scoped.filter((a) => oPass(a, "")); m.all = base.length; for (const a of base) m[a.bucket] = (m[a.bucket] ?? 0) + 1; return m; }} />
+          <Dropdown label="Sort" options={toOpts(OB_SORT)} value={sortBy} onChange={setSortBy} isDefault={sortBy === "priority"} menuWidth={240} />
+          <FilterPopover n={obMore}>
+            <Dropdown label="AE" options={aeOptList} value={aeFilter} onChange={setAeFilter} isDefault={aeFilter === "any"} counts={() => oCounts("ae", aeOptList.map((o) => o.v))} menuWidth={280} />
+            <Dropdown label="Segment" options={[{ v: "any", label: "any" }, ...segOpts.map((x) => ({ v: x, label: x }))]} value={segFilter} onChange={setSegFilter} isDefault={segFilter === "any"} counts={() => oCounts("seg", ["any", ...segOpts])} />
+            <Dropdown label="Play" options={[{ v: "any", label: "any" }, ...playOpts.map((x) => ({ v: x, label: x }))]} value={playFilter} onChange={setPlayFilter} isDefault={playFilter === "any"} counts={() => oCounts("play", ["any", ...playOpts])} />
+            <Dropdown label="LinkedIn" options={toOpts(LI_FILTER_OPTS)} value={obLiF} onChange={setObLiF} isDefault={obLiF === "any"} counts={() => oCounts("li", LI_FILTER_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Post-SQA" options={[{ v: "hide", label: "hidden" }, { v: "include", label: "included" }]} value={showPost ? "include" : "hide"} onChange={(v) => setShowPost(v === "include")} isDefault={!showPost}
+              counts={() => { const inB = accounts.filter((a) => (bucket === "all" || a.bucket === bucket) && oPass(a, "")); return { include: inB.length, hide: inB.filter((a) => !a.post_sqa).length }; }} />
+          </FilterPopover>
+          <span style={{ flex: "1 1 0" }} />
+          <span style={{ fontSize: fs(12.5), color: C.faint, whiteSpace: "nowrap" }}>{rows.length} shown</span>
         </div>
-        <Select label="AE" value={aeFilter} onChange={setAeFilter} options={[["any", "any"], ["unassigned", "Unassigned"], ...aeOpts]} />
-        <Select label="Segment" value={segFilter} onChange={setSegFilter} options={[["any", "any"], ...segOpts.map((s) => [s, s] as [string, string])]} />
-        <Select label="Play" value={playFilter} onChange={setPlayFilter} options={[["any", "any"], ...playOpts.map((s) => [s, s] as [string, string])]} />
-        <Select label="LinkedIn" value={obLiF} onChange={setObLiF} options={LI_FILTER_OPTS} />
-        <Select label="Sort" value={sortBy} onChange={setSortBy} options={[["priority", "priority"], ["stale", "longest since touch"], ["recent", "most recently touched"], ["contacts", "most contacts"], ["segment", "segment (ENT→Micro)"], ["company", "company A–Z"]]} />
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-          <input type="checkbox" checked={showPost} onChange={(e) => setShowPost(e.target.checked)} /> post-SQA
-        </label>
-        <span style={{ fontSize: fs(10.5), color: C.faint }}>{rows.length} shown</span>
+        <FilterPills pills={obPills} onClear={obClear} />
       </div>
 
       {q.isError ? <div style={{ color: C.danger, fontSize: fs(12) }}>{String(q.error)}</div> : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 360px) 1fr", gap: 12 }}>
-          <div style={{ ...PANEL(), maxHeight: 660, overflowY: "auto" }}>
+        <div className="bdr-split">
+          <div className="bdr-list" style={{ ...PANEL(), overflowY: "auto", overscrollBehavior: "contain" }}>
             {loading ? <div style={{ padding: 12 }}>{Array.from({ length: 8 }).map((_, i) => <div key={i} className="animate-pulse" style={{ height: 46, background: C.surfaceAlt, borderRadius: UI.radius2, marginBottom: 8 }} />)}</div>
               : rows.length === 0 ? <div style={{ padding: 16, fontSize: fs(12), color: C.muted }}>Nothing here.</div>
               : rows.slice(0, obShown).map((a) => {
@@ -3582,54 +3688,66 @@ function SignalFeed() {
     return m;
   }, [scoped]);
   const inBucket = useMemo(() => scoped.filter((r) => bucket === "all" || r.bucket === bucket), [scoped, bucket]);
-  const sigCounts = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const r of inBucket) for (const k of new Set(r.signals.map((s) => chipKey(s.sig)))) m[k] = (m[k] ?? 0) + 1;
-    return m;
-  }, [inBucket]);
   const stages = useMemo(() => Array.from(new Set(scoped.map((r) => r.lifecycle).filter(Boolean))).sort(), [scoped]);
   const plans = useMemo(() => Array.from(new Set(scoped.map((r) => r.plan).filter(Boolean))).sort(), [scoped]);
 
   const needle = search.trim().toLowerCase();
-  const filtered = useMemo(() => inBucket.filter((r) => {
-    if (sigSel.length && !r.signals.some((s) => sigSel.includes(chipKey(s.sig)))) return false;
-    if (stage !== "any" && r.lifecycle !== stage) return false;
-    if (plan !== "any" && r.plan !== plan) return false;
-    if (hasLi && !r.linkedin_url) return false;
-    if (opened !== "any") {
+  // Each filter is a predicate builder: value -> (row -> bool), or null when the filter is off.
+  // Same rules as before; split out so dropdowns can count "every other filter + this option".
+  const FX = useMemo<Record<string, (v: any) => ((r: Row) => boolean) | null>>(() => ({
+    sigs: (v: string[]) => (v.length ? (r) => r.signals.some((s) => v.includes(chipKey(s.sig))) : null),
+    stage: (v: string) => (v === "any" ? null : (r) => r.lifecycle === v),
+    plan: (v: string) => (v === "any" ? null : (r) => r.plan === v),
+    hasLi: (v: boolean) => (v ? (r) => !!r.linkedin_url : null),
+    opened: (v: string) => (v === "any" ? null : (r) => {
       const od = daysSince(r.last_opened);
-      if (opened === "never" && r.last_opened != null) return false;
-      if (opened === "since_touch" && !(r.last_opened != null && (r.last_touch == null || r.last_opened > r.last_touch))) return false;
-      if (opened === "le1" && !(od != null && od <= 1)) return false;
-      if (opened === "le3" && !(od != null && od <= 3)) return false;
-      if (opened === "le7" && !(od != null && od <= 7)) return false;
-      if (opened === "clicked" && !(r.last_clicked != null && (r.last_touch == null || r.last_clicked > r.last_touch))) return false;
-    }
-    if (pages.length && !pages.some((p) => r.page_cats.includes(p))) return false;
-    if (liF !== "any" && !liMatches(liF, liInfo(r.ov, r.hs_li))) return false;
-    if (ctOwner !== "any" && (ctOwner === "same" ? r.owner_id !== r.queue_owner_id : ctOwner === "other" ? r.owner_id === r.queue_owner_id : r.owner_id !== ctOwner)) return false;
-    if (touchedBy !== "any") {
+      if (v === "never") return r.last_opened == null;
+      if (v === "since_touch") return r.last_opened != null && (r.last_touch == null || r.last_opened > r.last_touch);
+      if (v === "le1") return od != null && od <= 1;
+      if (v === "le3") return od != null && od <= 3;
+      if (v === "le7") return od != null && od <= 7;
+      if (v === "clicked") return r.last_clicked != null && (r.last_touch == null || r.last_clicked > r.last_touch);
+      return true;
+    }),
+    pages: (v: string[]) => (v.length ? (r) => v.some((p) => r.page_cats.includes(p)) : null),
+    liF: (v: string) => (v === "any" ? null : (r) => liMatches(v, liInfo(r.ov, r.hs_li))),
+    ctOwner: (v: string) => (v === "any" ? null : (r) => (v === "same" ? r.owner_id === r.queue_owner_id : v === "other" ? r.owner_id !== r.queue_owner_id : r.owner_id === v)),
+    touchedBy: (v: string) => (v === "any" ? null : (r) => {
       const id = r.last_by_id;
-      if (touchedBy === "never" && r.last_touch != null) return false;
-      if (touchedBy === "me" && id !== acting) return false;
-      if (touchedBy === "owner" && id !== r.queue_owner_id) return false;
-      if (touchedBy === "other_bdr" && !(id && ROSTER.has(id) && id !== r.queue_owner_id)) return false;
-      if (touchedBy === "ae" && !(id && !ROSTER.has(id))) return false;
-    }
-    if (fresh !== "any") {
+      if (v === "never") return r.last_touch == null;
+      if (v === "me") return id === acting;
+      if (v === "owner") return id === r.queue_owner_id;
+      if (v === "other_bdr") return !!(id && ROSTER.has(id) && id !== r.queue_owner_id);
+      if (v === "ae") return !!(id && !ROSTER.has(id));
+      return true;
+    }),
+    fresh: (v: string) => (v === "any" ? null : (r) => {
       const d = daysSince(r.last_touch);
-      if (fresh === "never" && d != null) return false;
-      if (fresh === "gt7" && !(d == null || d > 7)) return false;
-      if (fresh === "gt3" && !(d == null || d > 3)) return false;
-      if (fresh === "le7" && !(d != null && d <= 7)) return false;
+      if (v === "never") return d == null;
+      if (v === "gt7") return d == null || d > 7;
+      if (v === "gt3") return d == null || d > 3;
+      if (v === "le7") return d != null && d <= 7;
+      return true;
+    }),
+    created: (v: string) => (v === "any" ? null : (r) => { const d = daysSince(r.created); return d != null && d <= Number(v); }),
+    search: (v: string) => (v ? (r) => [r.contact_name, r.email, r.company, r.ae_name, r.last_by, r.org_name].some((x) => (x || "").toLowerCase().includes(v)) : null),
+  }), [acting]);
+  const fstate: Record<string, any> = { sigs: sigSel, stage, plan, hasLi, opened, pages: Array.isArray(pages) ? pages : [], liF, ctOwner, touchedBy, fresh, created: createdWin, search: needle };
+  const fkey = JSON.stringify(fstate);
+  const preds = useMemo(() => Object.entries(fstate).map(([k, v]) => [k, FX[k](v)] as [string, ((r: Row) => boolean) | null]).filter(([, p]) => p) as [string, (r: Row) => boolean][], [fkey, FX]);
+  const passExcept = (r: Row, except: string) => preds.every(([k, p]) => k === except || p(r));
+  const filtered = useMemo(() => inBucket.filter((r) => passExcept(r, "")), [inBucket, preds]);
+  // live counts for a dropdown: rows passing every other filter, split by this filter's options
+  const countsFor = (key: string, opts: string[], src: Row[] = inBucket) => {
+    const base = src.filter((r) => passExcept(r, key));
+    const m: Record<string, number> = {};
+    for (const v of opts) {
+      const pv = key === "sigs" || key === "pages" ? [v] : key === "hasLi" ? v === "yes" : v;
+      const pr = FX[key](pv);
+      m[v] = pr ? base.filter(pr).length : base.length;
     }
-    if (createdWin !== "any") {
-      const d = daysSince(r.created);
-      if (d == null || d > Number(createdWin)) return false;
-    }
-    if (!needle) return true;
-    return [r.contact_name, r.email, r.company, r.ae_name, r.last_by, r.org_name].some((v) => (v || "").toLowerCase().includes(needle));
-  }), [inBucket, sigSel.join(","), stage, plan, hasLi, opened, pages.join(","), liF, ctOwner, touchedBy, fresh, createdWin, needle, acting]);
+    return m;
+  };
 
   const sortVal = (r: Row): number | string => {
     switch (sortBy) {
@@ -3659,6 +3777,7 @@ function SignalFeed() {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if ((e.target as HTMLElement)?.closest?.("[data-bdr-menu]")) return;
       const idx = sorted.findIndex((x) => x.contact_id === current?.contact_id);
       if (e.key === "j" || e.key === "ArrowDown") { const n = sorted[idx + 1]; if (n) { setSelected(n.contact_id); e.preventDefault(); } return; }
       if (e.key === "k" || e.key === "ArrowUp") { const n = sorted[idx - 1]; if (n) { setSelected(n.contact_id); e.preventDefault(); } return; }
@@ -3679,22 +3798,38 @@ function SignalFeed() {
   const onSelectRow = useCallback((id: string) => rowApi.current.setSelected(id), []);
   const onToggleDraftRow = useCallback((id: string) => { const r = rowApi.current.sorted.find((x) => x.contact_id === id); if (r) rowApi.current.toggleDraft(r); }, []);
   // Contact Owner (HubSpot) can be any BDR, AE or GTM person; list the ones in scope, most contacts first
-  const ctOwnerOptions: [string, string][] = (() => {
+  const ctOwnerOptions: DOpt[] = useMemo(() => {
     const m = new Map<string, { name: string; n: number }>();
     scoped.forEach((r) => { if (!r.owner_id) return; const e = m.get(r.owner_id) ?? { name: r.contact_owner || bdrName(r.owner_id), n: 0 }; e.n++; m.set(r.owner_id, e); });
-    const list = [...m.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => [id, `${e.name} (${e.n})`] as [string, string]);
-    return [["any", "anyone"], ["same", "same as BDR owner"], ["other", "someone else"], ...list];
-  })();
-  const activeFilters = sigSel.length + (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) + (liF !== "any" ? 1 : 0) +
-    (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (search ? 1 : 0) + (opened !== "any" ? 1 : 0) + (pages.length ? 1 : 0);
+    const list = [...m.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => ({ v: id, label: e.name }));
+    return [{ v: "any", label: "anyone" }, { v: "same", label: "same as BDR owner" }, { v: "other", label: "someone else" }, ...list];
+  }, [scoped]);
   const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setLiF("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
+  // filters living under "All filters" (for its badge) and the removable pills
+  const moreActive = (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) + (liF !== "any" ? 1 : 0) +
+    (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (opened !== "any" ? 1 : 0) + (Array.isArray(pages) && pages.length ? 1 : 0) + (showPost ? 1 : 0);
+  const pills = [
+    ...(search ? [{ k: "q", label: `Search: "${search}"`, onRemove: () => setSearch("") }] : []),
+    ...sigSel.map((k) => ({ k: "s:" + k, label: k, color: CHIPS.find((c) => c[0] === k)?.[1], onRemove: () => setSigSel(sigSel.filter((x) => x !== k)) })),
+    ...(ctOwner !== "any" ? [{ k: "co", label: `Contact owner: ${ctOwnerOptions.find((o) => o.v === ctOwner)?.label ?? ctOwner}`, onRemove: () => setCtOwner("any") }] : []),
+    ...(liF !== "any" ? [{ k: "li", label: `LinkedIn: ${optLabel(LI_FILTER_OPTS, liF)}`, onRemove: () => setLiF("any") }] : []),
+    ...(touchedBy !== "any" ? [{ k: "tb", label: `Last touch by: ${optLabel(TOUCHED_OPTS, touchedBy)}`, onRemove: () => setTouchedBy("any") }] : []),
+    ...(fresh !== "any" ? [{ k: "fr", label: `Freshness: ${optLabel(FRESH_OPTS, fresh)}`, onRemove: () => setFresh("any") }] : []),
+    ...(opened !== "any" ? [{ k: "op", label: `Email opened: ${optLabel(OPENED_OPTS, opened)}`, onRemove: () => setOpened("any") }] : []),
+    ...(Array.isArray(pages) ? pages : []).map((pg) => ({ k: "pg:" + pg, label: `Page: ${pg}`, onRemove: () => setPages(pages.filter((x) => x !== pg)) })),
+    ...(createdWin !== "any" ? [{ k: "cr", label: `Created ${optLabel(CREATED_OPTS, createdWin)}`, onRemove: () => setCreatedWin("any") }] : []),
+    ...(stage !== "any" ? [{ k: "st", label: `Stage: ${stage}`, onRemove: () => setStage("any") }] : []),
+    ...(plan !== "any" ? [{ k: "pl", label: `Plan: ${plan.replace("_", " ")}`, onRemove: () => setPlan("any") }] : []),
+    ...(hasLi ? [{ k: "hl", label: "Has LinkedIn profile", onRemove: () => setHasLi(false) }] : []),
+    ...(showPost ? [{ k: "ps", label: "Post-SQA included", onRemove: () => setShowPost(false) }] : []),
+  ];
 
   // HubSpot bar: lives inside the dialog box in the Unova theme, in the header otherwise.
   const hsButtons = (
     <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginTop: 8 }}>
       <a href={HS_INDEX} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}><ExternalLink size={12} /> Open in HubSpot</a>
       <button style={btn(C.accent)} onClick={() => copyText("filters", hubspotRecipe({ owners: scopeIds, bucket, sigs: sigSel, opened, pages, hasLi, createdWin }).join("\nAND "))}>Copy HubSpot filters</button>
-      <button style={btn(C.accent)} onClick={() => copyText("emails", sorted.map((r) => r.email).filter(Boolean).join(", "))}>Copy {sorted.filter((r) => r.email).length} emails</button>
+      <button style={btn(C.accent)} onClick={() => copyText("emails", sorted.map((r) => r.email).filter(Boolean).join(", "))}>{(() => { const n = sorted.filter((r) => r.email).length; return `Copy ${n} email${n === 1 ? "" : "s"}`; })()}</button>
       <button style={btn(C.muted)} onClick={() => setShowRecipe(!showRecipe)}>{showRecipe ? "Hide" : "Show"} filter recipe</button>
       {copied && <span style={{ fontSize: fs(10.5), color: C.ok }}>✓ {copied} copied</span>}
     </div>
@@ -3734,13 +3869,11 @@ function SignalFeed() {
           {!UI.game && hsPanels}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(10.5), color: C.faint }}>
-            Acting as
-            <select value={acting} onChange={(e) => setActing(e.target.value)} style={{ ...ctl, cursor: "pointer", color: C.accent }}>
-              {BDRS.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          </label>
-          <BdrMultiSelect selected={scopeIds} onChange={(v) => { setOwners(v); setSelected(null); }} />
+          <Dropdown label="Acting as" options={BDRS.map(bdrOpt)} value={acting} onChange={setActing} isDefault align="right" menuWidth={260} />
+          <Dropdown label="Queues" multi options={BDRS.map(bdrOpt)} values={scopeIds} align="right" menuWidth={280} isDefault={scopeIds.length === 1 && scopeIds[0] === acting}
+            display={scopeIds.length === BDRS.length ? "All BDRs" : scopeIds.length === 1 ? bdrName(scopeIds[0]) : `${scopeIds.length} BDRs`}
+            onChangeMulti={(v) => { setOwners(v.length ? v : [acting]); setSelected(null); }} onOnly={(v) => { setOwners([v]); setSelected(null); }}
+            counts={() => { const m: Record<string, number> = Object.fromEntries(BDRS.map((b) => [b.id, 0])); for (const r of rows) m[r.queue_owner_id] = (m[r.queue_owner_id] ?? 0) + 1; return m; }} />
         </div>
       </div>
 
@@ -3754,61 +3887,40 @@ function SignalFeed() {
         </DialogBox>
       )}
       {UI.game && hsPanels}
-      <div style={{ display: "flex", gap: 4, borderBottom: `1px solid ${C.border}`, marginBottom: 10, flexWrap: "wrap" }}>
-        {BUCKETS.map((b) => {
-          const on = bucket === b.id;
-          return (
-            <button key={b.id} title={b.hint} onClick={() => { setBucket(b.id); setSelected(null); }} style={{
-              padding: "6px 12px", fontSize: fs(11.5), fontFamily: "inherit", cursor: "pointer", border: "none",
-              borderBottom: `2px solid ${on ? C.accent : "transparent"}`, background: "transparent", color: on ? C.accent : C.muted, fontWeight: on ? 700 : 400,
-            }}>
-              {b.label} <span style={{ color: on ? C.text : C.faint }}>{bucketCounts[b.id] ?? 0}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
-        {CHIPS.map(([k, col]) => (
-          <Chip key={k} label={k} color={col} count={sigCounts[k] ?? 0} active={sigSel.includes(k)}
-            onClick={() => setSigSel(sigSel.includes(k) ? sigSel.filter((x) => x !== k) : [...sigSel, k])} />
-        ))}
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center", marginBottom: 12 }}>
-        <div style={{ ...ctl, display: "flex", alignItems: "center", gap: 6, padding: "4px 8px" }}>
-          <Search size={12} color={C.faint} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="name, company, AE, toucher"
-            style={{ background: "transparent", color: C.text, border: "none", outline: "none", fontSize: fs(11.5), fontFamily: "inherit", width: 170 }} />
+      {/* filter bar: the common filters up front, the rest under "All filters"; active ones show as pills */}
+      <div style={{ ...PANEL(), padding: SP.md, marginBottom: SP.lg }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center" }}>
+          <SearchBox value={search} onChange={setSearch} placeholder="Name, company, AE, toucher" />
+          <Dropdown label="Bucket" options={BUCKETS.map((b) => ({ v: b.id, label: b.label, hint: b.hint }))} value={bucket} isDefault={bucket === "active"}
+            onChange={(v) => { setBucket(v); setSelected(null); }}
+            counts={() => { const m: Record<string, number> = Object.fromEntries(BUCKETS.map((b) => [b.id, 0])); const base = scoped.filter((r) => passExcept(r, "")); m.all = base.length; for (const r of base) m[r.bucket] = (m[r.bucket] ?? 0) + 1; return m; }} />
+          <Dropdown label="Signals" multi options={CHIPS.map(([k, c]) => ({ v: k, label: k, color: c }))} values={sigSel} onChangeMulti={setSigSel}
+            counts={() => countsFor("sigs", CHIPS.map(([k]) => k))} />
+          <Dropdown label="Sort" options={toOpts(SORT_OPTS)} value={sortBy} onChange={setSortBy} isDefault={sortBy === "priority"} menuWidth={240} />
+          <button type="button" onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")} title="Flip sort direction" aria-label={`Sort ${sortDir === "asc" ? "ascending" : "descending"}`}
+            style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><ArrowUpDown size={14} /> {sortDir}</button>
+          <FilterPopover n={moreActive}>
+            <Dropdown label="Contact owner" options={ctOwnerOptions} value={ctOwner} onChange={setCtOwner} isDefault={ctOwner === "any"} counts={() => countsFor("ctOwner", ctOwnerOptions.map((o) => o.v))} menuWidth={280} />
+            <Dropdown label="LinkedIn" options={toOpts(LI_FILTER_OPTS)} value={liF} onChange={setLiF} isDefault={liF === "any"} counts={() => countsFor("liF", LI_FILTER_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Last touch by" options={toOpts(TOUCHED_OPTS)} value={touchedBy} onChange={setTouchedBy} isDefault={touchedBy === "any"} counts={() => countsFor("touchedBy", TOUCHED_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Freshness" options={toOpts(FRESH_OPTS)} value={fresh} onChange={setFresh} isDefault={fresh === "any"} counts={() => countsFor("fresh", FRESH_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Email opened" options={toOpts(OPENED_OPTS)} value={opened} onChange={setOpened} isDefault={opened === "any"} counts={() => countsFor("opened", OPENED_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Pages viewed" multi options={PAGE_OPTS.map((v) => ({ v, label: v }))} values={Array.isArray(pages) ? pages : []} onChangeMulti={setPages} counts={() => countsFor("pages", PAGE_OPTS)} />
+            <Dropdown label="Created" options={toOpts(CREATED_OPTS)} value={createdWin} onChange={setCreatedWin} isDefault={createdWin === "any"} counts={() => countsFor("created", CREATED_OPTS.map((o) => o[0]))} />
+            <Dropdown label="Stage" options={[{ v: "any", label: "any" }, ...stages.map((x) => ({ v: x, label: x }))]} value={stage} onChange={setStage} isDefault={stage === "any"} counts={() => countsFor("stage", ["any", ...stages])} />
+            <Dropdown label="Plan" options={[{ v: "any", label: "any" }, ...plans.map((x) => ({ v: x, label: x.replace("_", " ") }))]} value={plan} onChange={setPlan} isDefault={plan === "any"} counts={() => countsFor("plan", ["any", ...plans])} />
+            <Dropdown label="LinkedIn profile" options={[{ v: "any", label: "any" }, { v: "yes", label: "has a profile URL" }]} value={hasLi ? "yes" : "any"} onChange={(v) => setHasLi(v === "yes")} isDefault={!hasLi} counts={() => countsFor("hasLi", ["any", "yes"])} />
+            <Dropdown label="Post-SQA" options={[{ v: "hide", label: "hidden", hint: "Contacts or companies with a live SQA stay out of the queue" }, { v: "include", label: "included" }]} value={showPost ? "include" : "hide"} onChange={(v) => setShowPost(v === "include")} isDefault={!showPost}
+              counts={() => { const inB = derived.filter((r) => (bucket === "all" || r.bucket === bucket) && passExcept(r, "")); return { include: inB.length, hide: inB.filter((r) => !r.post_sqa).length }; }} />
+          </FilterPopover>
+          <span style={{ flex: "1 1 0" }} />
+          <span style={{ fontSize: fs(12.5), color: C.faint, whiteSpace: "nowrap" }}>{sorted.length} shown</span>
+          <button style={{ ...ctl, cursor: "pointer" }} title="Select the top contacts in the current view (max 15)"
+            onClick={() => setDraftSel([...draftList, ...sorted.filter((r) => !draftIds.has(r.contact_id)).slice(0, Math.max(0, 15 - draftList.length)).map(mkDraft)])}>Select top</button>
+          {draftIds.size > 0 && <button style={{ ...ctl, cursor: "pointer", color: C.faint }} onClick={() => setDraftSel([])}>Clear selection</button>}
+          <button style={btn(C.accent, draftIds.size === 0)} disabled={draftIds.size === 0} onClick={() => setTab("drafts")}><Mail size={14} /> Draft {draftIds.size}</button>
         </div>
-        <Select label="Contact owner" value={ctOwner} onChange={setCtOwner} options={ctOwnerOptions} />
-        <Select label="LinkedIn" value={liF} onChange={setLiF} options={LI_FILTER_OPTS} />
-        <Select label="Last touch by" value={touchedBy} onChange={setTouchedBy} options={[["any", "anyone"], ["me", "me (acting)"], ["owner", "queue owner"], ["other_bdr", "another BDR"], ["ae", "AE / non-BDR"], ["never", "never touched"]]} />
-        <Select label="Freshness" value={fresh} onChange={setFresh} options={[["any", "any"], ["never", "never touched"], ["gt3", "> 3d since touch"], ["gt7", "> 7d since touch"], ["le7", "touched ≤ 7d"]]} />
-        <Select label="Email opened" value={opened} onChange={setOpened} options={[["any", "any"], ["since_touch", "since our last touch"], ["le1", "≤ 1d ago"], ["le3", "≤ 3d ago"], ["le7", "≤ 7d ago"], ["clicked", "clicked since last touch"], ["never", "never opened"]]} />
-        <MultiPick label="Pages viewed" options={["Pricing", "Docs", "Product", "Blog", "Trial / ad landing", "Books / courses", "Events", "Contact / customers", "Homepage", "Careers"]} selected={Array.isArray(pages) ? pages : []} onChange={setPages} />
-        <Select label="Created" value={createdWin} onChange={setCreatedWin} options={[["any", "any time"], ["1", "≤ 1d"], ["3", "≤ 3d"], ["7", "≤ 7d"], ["30", "≤ 30d"], ["90", "≤ 90d"]]} />
-        <Select label="Stage" value={stage} onChange={setStage} options={[["any", "any"], ...stages.map((s) => [s, s] as [string, string])]} />
-        <Select label="Plan" value={plan} onChange={setPlan} options={[["any", "any"], ...plans.map((s) => [s, s.replace("_", " ")] as [string, string])]} />
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-          <input type="checkbox" checked={hasLi} onChange={(e) => setHasLi(e.target.checked)} /> has LinkedIn
-        </label>
-        <label style={{ fontSize: fs(10.5), color: C.muted, display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-          <input type="checkbox" checked={showPost} onChange={(e) => setShowPost(e.target.checked)} /> post-SQA
-        </label>
-        <Select label="Sort" value={sortBy} onChange={setSortBy} options={[
-          ["priority", "priority"], ["signal_new", "newest signal"], ["stale", "longest since touch"], ["created_new", "created: newest"],
-          ["created_old", "created: oldest"], ["stl", "slowest speed-to-lead"], ["touches", "fewest touches (14d)"], ["awr", "AWR"],
-          ["cpu", "CPU 7d"], ["trial_end", "trial ending soonest"], ["owner", "queue owner"], ["company", "company A–Z"],
-        ]} />
-        <button style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }} onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")}>
-          <ArrowUpDown size={12} /> {sortDir === "asc" ? "asc" : "desc"}
-        </button>
-        <button style={btn(C.accent, draftIds.size === 0)} disabled={draftIds.size === 0} onClick={() => setTab("drafts")}><Mail size={12} /> Draft {draftIds.size}</button>
-        <button style={{ ...ctl, cursor: "pointer" }} title="Select the top contacts in the current view (max 15)"
-          onClick={() => setDraftSel([...draftList, ...sorted.filter((r) => !draftIds.has(r.contact_id)).slice(0, Math.max(0, 15 - draftList.length)).map(mkDraft)])}>select top</button>
-        {draftIds.size > 0 && <button style={{ ...ctl, cursor: "pointer", color: C.faint }} onClick={() => setDraftSel([])}>clear sel</button>}
-        {activeFilters > 0 && <button style={{ ...ctl, cursor: "pointer", color: C.warn }} onClick={resetFilters}>reset {activeFilters} filter{activeFilters > 1 ? "s" : ""}</button>}
-        <span style={{ fontSize: fs(10.5), color: C.faint }}>{sorted.length} shown</span>
+        <FilterPills pills={pills} onClear={() => { resetFilters(); setShowPost(false); }} />
       </div>
 
       {q.isError ? (
