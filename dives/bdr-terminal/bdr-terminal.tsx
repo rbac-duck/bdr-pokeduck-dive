@@ -1848,34 +1848,26 @@ function TrainerTab({ defaultTrainer }: { defaultTrainer: string }) {
   const tr = trainerOf(tid);
   return (
     <div style={{ fontFamily: UI.body }}>
-      <div style={{ ...PANEL(), display: "flex", alignItems: "center", gap: 14, padding: "10px 16px", marginBottom: 12, borderLeft: `6px solid ${tr.color}` }}>
-        <Sprite map={lineFor(tid, false)[0].map} pal={palOf(tid, false, false)} h={44} />
-        <Sprite map={lineFor(tid, true)[0].map} pal={palOf(tid, true, false)} h={44} />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: fs(11), color: C.muted, textTransform: "uppercase", letterSpacing: 1 }}>{tr.cls}</div>
-          <div style={{ fontSize: fs(19), fontWeight: 700 }}>{bdrName(tid)}</div>
-          <div style={{ fontSize: fs(11), color: C.muted }}>Inbound: {tr.type} · {lineFor(tid, false).map((s) => s.name).join(" → ")}</div>
-          <div style={{ fontSize: fs(11), color: C.muted }}>Outbound: {tr.obType} · {lineFor(tid, true).map((s) => s.name).join(" → ")}</div>
+      <div style={{ ...PANEL(), display: "flex", alignItems: "center", gap: SP.lg, padding: `${SP.md}px ${SP.lg}px`, marginBottom: SP.lg, borderLeft: `6px solid ${tr.color}`, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: SP.sm, alignItems: "flex-end" }}>
+          <Sprite map={lineFor(tid, false)[0].map} pal={palOf(tid, false, false)} h={56} fit="box" />
+          <Sprite map={lineFor(tid, true)[0].map} pal={palOf(tid, true, false)} h={56} fit="box" />
+        </div>
+        <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+          <div style={{ fontSize: fs(11.5), color: UI.game ? shade(tr.color, 0.2) : C.muted, textTransform: "uppercase", letterSpacing: 1, fontWeight: 700 }}>{tr.cls}</div>
+          <div style={{ fontSize: fs(21), fontWeight: 800, lineHeight: 1.25 }}>{bdrName(tid)}</div>
+          <div style={{ fontSize: fs(12.5), color: C.muted, marginTop: SP.xs }}>Inbound: {tr.type} · {lineFor(tid, false).map((s) => s.name).join(" → ")}</div>
+          <div style={{ fontSize: fs(12.5), color: C.muted }}>Outbound: {tr.obType} · {lineFor(tid, true).map((s) => s.name).join(" → ")}</div>
         </div>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(10.5), color: C.faint }}>
-          Trainer
-          <select value={tid} onChange={(e) => setTrainer(e.target.value)} style={{ ...ctl, cursor: "pointer", color: C.accent }}>
-            {BDRS.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
-        </label>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(10.5), color: C.faint }}>
-          Quarter
-          <select value={qtr.id} onChange={(e) => setQid(e.target.value)} style={{ ...ctl, cursor: "pointer" }}>
-            {QUARTERS.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
-          </select>
-        </label>
-        <span style={{ fontSize: fs(10.5), color: C.faint }}>
+      <div style={{ display: "flex", gap: SP.sm, alignItems: "center", marginBottom: SP.lg, flexWrap: "wrap" }}>
+        <Dropdown label="Trainer" options={BDRS.map(bdrOpt)} value={tid} onChange={setTrainer} isDefault menuWidth={260} />
+        <Dropdown label="Quarter" options={QUARTERS.map((q) => ({ v: q.id, label: q.label }))} value={qtr.id} onChange={setQid} isDefault menuWidth={200} />
+        <span style={{ fontSize: fs(12), color: C.faint }}>
           Total quota {totalQuota}{quotaRow ? "" : " (default)"} = inbound {Math.max(0, totalQuota - obTarget)} + outbound {obTarget}{quotaRow?.ob_sqa_target == null ? " (default split)" : ""} · &gt;100% unlocks at {obTarget} outbound · BDR Terminal SQA rules
         </span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(440px, 1fr))", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 440px), 1fr))", gap: SP.lg }}>
         <CreaturePanel tid={tid} qtr={qtr} ob={false} quota={Math.max(1, totalQuota - obTarget)} />
         <CreaturePanel tid={tid} qtr={qtr} ob quota={Math.max(1, obTarget)} />
       </div>
@@ -1921,7 +1913,7 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
   const nextMove = MV.find((m) => m.lv > lv);
   const nextEvo = stage === 0 ? t1 : stage === 1 ? t2 : quota;
   const loading = g.isLoading;
-  const px: any = { fontFamily: UI.body, textTransform: "uppercase", letterSpacing: 0.5 };
+  const px: any = { fontFamily: UI.body, textTransform: "uppercase", letterSpacing: 0.5, minWidth: 0 };
 
   return (
     <div style={px}>
@@ -1929,11 +1921,11 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
         {ob ? "◎ OUTBOUND" : "◓ INBOUND"} · target {quota} SQAs <span style={{ color: C.faint }}>· {ob ? "Apollo contacts + Outbound-source deals" : "everything except Apollo contacts + Outbound-source deals"}</span>
       </div>
       {g.isError ? <div style={{ color: C.danger, fontSize: fs(12), textTransform: "none" }}>{String(g.error)}</div> : (
-      <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: SP.md }}>
         <GbBox style={{ minHeight: 330, position: "relative" }}>
-          {loading ? <div style={{ height: 300 }} className="animate-pulse" /> : (<>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", ...(UI.game ? BATTLE_BG : {}) }}>
-              <div style={{ width: "55%", ...(UI.game ? NAMEPLATE : {}) }}>
+          {loading ? <LoadingMon bdr={tid} ob={ob} label="Who's that creature? Counting up EXP" rows={3} rowH={72} /> : (<>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "stretch", flexWrap: "wrap", gap: SP.md, ...(UI.game ? BATTLE_BG : {}) }}>
+              <div style={{ flex: "1 1 230px", minWidth: 0, alignSelf: "flex-start", ...(UI.game ? NAMEPLATE : {}) }}>
                 <div style={{ fontSize: UI.game ? undefined : 15, fontWeight: 700 }}>{UI.game ? <PixelText text={`${sp.name}${shiny ? " ✦" : ""}`} px={fs(17)} color="#303030" /> : `${sp.name}${shiny ? " ✦" : ""}`}</div>
                 <div style={{ margin: `${SP.xs}px 0 ${SP.sm}px` }}><LvBadge lv={lv} px={12} /></div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(10) }}>
@@ -1945,12 +1937,12 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
                 </div>
                 <div style={{ fontSize: fs(9.5), textAlign: "right", marginTop: 2 }}>{Math.round(lvNext - xp).toLocaleString()} TO :L{lv + 1}</div>
               </div>
-              <div style={{ flex: 1, minWidth: 0, alignSelf: "stretch", display: "flex", alignItems: "flex-end" }}>
+              <div style={{ flex: "1 1 170px", minWidth: 0, display: "flex", alignItems: "flex-end", minHeight: 140 }}>
                 <SpriteFill map={sp.map} pal={pal} maxH={200} minH={96} pad={UI.game ? STAGE(shiny) : { background: pal === SHINY ? "#fff4cf" : GB.d3, borderRadius: UI.radius2, padding: 4 }} />
               </div>
             </div>
 
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: SP.md, flexWrap: "wrap" }}>
               {LINE.map((s, i) => (
                 <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <div style={{ opacity: i <= stage ? 1 : 0.35, textAlign: "center" }}>
@@ -1976,7 +1968,7 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
 
         {UI.game && !loading && <TodayLedger x={x} ob={ob} />}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))", gap: SP.md }}>
           <GbBox>
             <div style={{ fontSize: fs(11), fontWeight: 800, marginBottom: 6 }}>STATS</div>
             {stats.map((s) => (
@@ -2435,16 +2427,17 @@ function useLeagueRow({ b, qtr, quotas, onData }: { b: { id: string; name: strin
 }
 
 // One creature, centered on its grass pad, with level + today's XP under it
-function LeagueMon({ s, ob, bdr, scale = 4.6, showToday = true }: { s: Summ | null; ob: boolean; bdr: string; scale?: number; showToday?: boolean }) {
-  const box = Math.round(scale * 16);
+// h = sprite slot height; integer-scaled so the art stays crisp (96 -> 1x, 192 -> 2x)
+function LeagueMon({ s, ob, bdr, h = 96, showToday = true }: { s: Summ | null; ob: boolean; bdr: string; h?: number; showToday?: boolean }) {
+  const box = h;
   if (!s) {
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }}>
         <div style={{ ...STAGE(false), padding: "2px 14px 18px", lineHeight: 0, filter: "brightness(0)", opacity: 0.16 }}>
-          <Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} h={Math.round(scale * 20)} />
+          <Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} h={h} />
         </div>
-        <div style={{ fontSize: fs(10.5), fontWeight: 700, color: C.faint }}>???</div>
-        <div style={{ fontSize: fs(9.5), color: C.faint }}>:L?? · ??/?? SQA</div>
+        <PixelText text="???" px={12} color={C.faint} />
+        <div style={{ fontSize: fs(11), color: C.faint }}>Lv ?? · ??/?? SQA</div>
       </div>
     );
   }
@@ -2453,10 +2446,10 @@ function LeagueMon({ s, ob, bdr, scale = 4.6, showToday = true }: { s: Summ | nu
     <div title={`${sp.name} Lv ${s.lv}${s.shiny ? " ✦ shiny" : ""}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0, width: "100%" }}>
       <div style={{ fontSize: fs(9), letterSpacing: 1, color: C.accent }}>{ob ? "◎ OUTBOUND" : "◓ INBOUND"}</div>
       <div style={{ ...STAGE(s.shiny), padding: "2px 14px 18px", lineHeight: 0, minHeight: box, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-        <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} h={Math.round(scale * 20)} />
+        <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} h={h} />
       </div>
-      <div style={{ fontSize: fs(11), fontWeight: 700, color: "#303030", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sp.name}{s.shiny ? " ✦" : ""}</div>
-      <div style={{ fontSize: fs(9.5), color: C.muted }}>:L{s.lv} · {s.sqas}/{s.quota} SQA</div>
+      <div style={{ maxWidth: "100%", overflow: "hidden", lineHeight: 0, marginTop: 2 }}>{UI.game ? <PixelText text={`${sp.name}${s.shiny ? " ✦" : ""}`} px={12} color="#303030" /> : <b style={{ fontSize: fs(11), lineHeight: 1.4 }}>{sp.name}</b>}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(11), color: C.muted }}><LvBadge lv={s.lv} px={9} color="#4f5762" /> · {s.sqas}/{s.quota} SQA</div>
       {showToday && (
         <div style={{ width: "100%", maxWidth: 170, marginTop: 3 }}>
           <ExpBar x={s.x} h={8} />
@@ -2548,7 +2541,7 @@ function HofCard({ bdr, qtr, quotas }: { bdr: string; qtr: any; quotas: any[] })
   const total = (si?.sqas ?? 0) + (so?.sqas ?? 0);
   const cleared = !!si && !!so && total >= qf.total;
   const over = cleared && so!.sqas >= qf.ob && total > qf.total;
-  const Mon = ({ s, ob }: { s: Summ | null; ob: boolean }) => <LeagueMon s={s} ob={ob} bdr={bdr} scale={5} showToday={live} />;
+  const Mon = ({ s, ob }: { s: Summ | null; ob: boolean }) => <LeagueMon s={s} ob={ob} bdr={bdr} h={192} showToday={live} />;
   return (
     <GbBox style={{ opacity: gi.isError || go.isError ? 0.6 : 1, borderTop: `6px solid ${trainerOf(bdr).color}` }}>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(11), fontWeight: 800, marginBottom: 6 }}>
@@ -2592,9 +2585,9 @@ function LeagueTab() {
           ))}
         </div>
         {view === "board" ? (
-          <Select label="Quarter" value={qtr.id} onChange={(v) => { setQid(v); setResults({}); }} options={QUARTERS.map((q) => [q.id, q.label] as [string, string])} />
+          <Dropdown label="Quarter" isDefault menuWidth={200} value={qtr.id} onChange={(v) => { setQid(v); setResults({}); }} options={QUARTERS.map((q) => ({ v: q.id, label: q.label }))} />
         ) : (
-          <Select label="Trainer" value={hofId} onChange={setHofBdr} options={BDRS.map((b) => [b.id, b.name] as [string, string])} />
+          <Dropdown label="Trainer" options={BDRS.map(bdrOpt)} value={hofId} onChange={setHofBdr} isDefault menuWidth={260} />
         )}
       </div>
 
@@ -4264,10 +4257,10 @@ export default function BdrTerminal() {
   const game = UI.game;
   const me = bdrName(acting);
   const TABS: [string, string, string][] = [["feed", "▤ SIGNAL FEED", "INBOUND"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
-  const wrap: any = { padding: 18, background: game ? "transparent" : C.page, color: C.text };
+  const wrap: any = { background: game ? "transparent" : C.page, color: C.text };
   const rivet = (pos: any): any => ({ position: "absolute", width: 8, height: 8, borderRadius: 999, background: "#5fb3e6", boxShadow: "inset -1px -1px 0 #0a3550", ...pos });
   return (
-    <div className="bdr-root" style={{ background: UI.bg, minHeight: "100%", color: C.text, fontFamily: UI.body, ["--bdr-hover" as any]: game ? "#f4f7fb" : "#1b241f" }}>
+    <div className="bdr-root" style={{ background: UI.bg, minHeight: "100vh", color: C.text, fontFamily: UI.body, ["--bdr-hover" as any]: game ? "#f4f7fb" : "#1b241f" }}>
       <style>{FONT_CSS}</style>
       {game && (tab === "feed" || tab === "outbound") && <TrainingShowcase bdr={acting} ob={tab === "outbound"} />}
       <div style={{ position: "relative", display: "flex", gap: game ? 8 : 2, padding: game ? "14px 18px 0" : "10px 18px 0", background: game ? "transparent" : C.page, alignItems: "center", flexWrap: "wrap" }}>
@@ -4292,13 +4285,13 @@ export default function BdrTerminal() {
         {showSettings && <SettingsPanel theme={theme} setTheme={setTheme} size={uiSize} setSize={setUiSize} onClose={() => setShowSettings(false)} />}
       </div>
       {tab === "trainer"
-        ? <div style={wrap}><TrainerTab defaultTrainer={acting} /></div>
+        ? <div className="bdr-page" style={wrap}><TrainerTab defaultTrainer={acting} /></div>
         : tab === "drafts"
-        ? <div style={wrap}><DraftsTab /></div>
+        ? <div className="bdr-page" style={wrap}><DraftsTab /></div>
         : tab === "outbound"
         ? <OutboundFeed />
         : tab === "league"
-        ? <div style={wrap}><LeagueTab /></div>
+        ? <div className="bdr-page" style={wrap}><LeagueTab /></div>
         : <SignalFeed />}
     </div>
   );

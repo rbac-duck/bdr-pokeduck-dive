@@ -29,7 +29,7 @@ const tweak = (row: Record<string, number>) => {
   if (qp().has("mockCap")) { row.linkedin_today = 30; row.hygiene_today = 40; }
   return row;
 };
-const idIn = (sql: string) => ROSTER_IDS.find((id) => sql.includes(`'${id}'`)) ?? "89400804";
+const idIn = (sql: string) => /'(\d+)' AS bdr/.exec(sql)?.[1] ?? "89400804";
 
 const ago = (h: number) => new Date(Date.now() - h * 3600e3).toISOString().slice(0, 19);
 const sigs = (...s: [string, number, number, string?][]) => JSON.stringify(s.map(([sig, rnk, h, detail]) => ({ sig, rnk, ts: ago(h), detail: detail ?? "" })));
