@@ -51,7 +51,9 @@ const UI: any = {
   body: FONT_SANS,
   pixel: FONT_GAME,
   bg: "#f3f4f6",
+  trainer: "#3878c8", // acting BDR's trainer color: identity accent for nav, page kicker and the selected row
 };
+const trainerInk = () => (UI.game ? shade(UI.trainer, 0.22) : C.accent); // readable on white
 const fs = (n: number) => Math.round(n * UI.scale * 2) / 2;
 const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialiased; }
 .bdr-root button:active { transform: translateY(1px); }
@@ -83,7 +85,10 @@ const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialia
 @keyframes bdrSpin{to{transform:rotate(360deg)}} @keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
 @keyframes bdrFloat { 0% { opacity: 0; transform: translate(-50%, 6px) } 15% { opacity: 1 } 100% { opacity: 0; transform: translate(-50%, -34px) } }
 @keyframes bdrStripe { from { background-position: 0 0 } to { background-position: 24px 0 } }
-@keyframes bdrPop { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }`;
+@keyframes bdrPop { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }
+@keyframes bdrHop { 0%, 100% { transform: translateY(0) } 40% { transform: translateY(-5px) } 60% { transform: translateY(-5px) } }
+.bdr-hop { animation: bdrHop 1.1s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .bdr-hop { animation: none; } }`;
 // readable ink on a coloured badge
 const inkOn = (hex: string) => {
   const h = hex.replace("#", "");
@@ -864,6 +869,31 @@ function PixelText({ text, px = 14, color = "currentColor", shadow, title }: { t
   );
 }
 
+// Empty state: the acting BDR's creature with a short game line
+function EmptyMon({ bdr, ob, title, children }: { bdr: string; ob: boolean; title: string; children?: any }) {
+  const sp = lineFor(bdr, ob)[0];
+  return (
+    <div style={{ padding: `${SP.xxl}px ${SP.xl}px`, textAlign: "center", display: "flex", flexDirection: "column", alignItems: "center", gap: SP.md }}>
+      <div style={{ ...STAGE(false), padding: "4px 16px 18px", lineHeight: 0 }}><Sprite map={sp.map} pal={palOf(bdr, ob, false)} h={64} fit="box" /></div>
+      {UI.game ? <PixelText text={title} px={fs(14)} color={C.text} /> : <b style={{ fontSize: fs(13) }}>{title}</b>}
+      {children && <div style={{ fontSize: fs(13), color: C.muted, maxWidth: 300, lineHeight: 1.5 }}>{children}</div>}
+    </div>
+  );
+}
+// Loading state: a creature silhouette hops while rows load (it's clearly not real data yet)
+function LoadingMon({ bdr, ob, label, rows = 6, rowH = 64 }: { bdr: string; ob: boolean; label: string; rows?: number; rowH?: number }) {
+  const sp = lineFor(bdr, ob)[0];
+  return (
+    <div style={{ padding: SP.lg }} aria-busy="true">
+      <div style={{ display: "flex", alignItems: "center", gap: SP.md, marginBottom: SP.lg }}>
+        <span className="bdr-hop" style={{ filter: "brightness(0)", opacity: 0.22, lineHeight: 0, display: "inline-block" }}><Sprite map={sp.map} pal={palOf(bdr, ob, false)} h={40} /></span>
+        <span style={{ fontSize: fs(13), color: C.faint }}>{label}<span style={{ animation: "bdrBlink 1s steps(1) infinite" }}>…</span></span>
+      </div>
+      {Array.from({ length: rows }).map((_, i) => <div key={i} className="animate-pulse" style={{ height: rowH, background: C.surfaceAlt, borderRadius: UI.radius2, marginBottom: SP.sm, opacity: 1 - i * 0.12 }} />)}
+    </div>
+  );
+}
+
 // Page title: pixel type in the game theme, plain bold mono in Terminal
 function PageTitle({ text }: { text: string }) {
   return (
@@ -887,7 +917,7 @@ function DialogBox({ children }: any) {
   );
 }
 
-function CommandMenu({ prompt, items }: { prompt: any; items: { label: string; c1: string; c2: string; onClick?: () => void; href?: string; disabled?: boolean; title?: string }[] }) {
+function CommandMenu({ prompt, items, mon }: { prompt: any; items: { label: string; c1: string; c2: string; onClick?: () => void; href?: string; disabled?: boolean; title?: string }[]; mon?: any }) {
   if (!UI.game) return null;
   const cmd = (it: any): any => ({
     fontFamily: UI.body, fontSize: fs(14), fontWeight: 700, letterSpacing: 1, color: "#ffffff", textShadow: "1px 1px 0 rgba(0,0,0,.35)",
@@ -897,7 +927,10 @@ function CommandMenu({ prompt, items }: { prompt: any; items: { label: string; c
   });
   return (
     <div className="bdr-cmd">
-      <div style={{ ...DIALOG(), display: "flex", alignItems: "center" }}>{prompt}</div>
+      <div style={{ ...DIALOG(), display: "flex", alignItems: "center", gap: SP.md }}>
+        {mon && <div style={{ flexShrink: 0, lineHeight: 0 }}>{mon}</div>}
+        <div style={{ minWidth: 0 }}>{prompt}</div>
+      </div>
       <div className="bdr-cmd-btns">
         {items.map((it) => it.href
           ? <a key={it.label} href={it.href} target="_blank" rel="noopener noreferrer" title={it.title} style={cmd(it)}>{it.label}</a>
@@ -1208,7 +1241,8 @@ function Card({ r, acting, busy, onAct, runMsg, pendingKeys, stuck, onRetry }: {
         ))}
       </div>
 
-      <CommandMenu prompt={<span>What will you do with <b>{(r.contact_name || r.email || "this lead").split(" ")[0]}</b>?</span>} items={[
+      <CommandMenu mon={<Sprite map={lineFor(acting, false)[0].map} pal={palOf(acting, false, false)} h={56} fit="box" />}
+        prompt={<span>What will you do with <b>{(r.contact_name || r.email || "this lead").split(" ")[0]}</b>?</span>} items={[
         { label: "DRAFT", c1: "#f08080", c2: "#d04848", title: "Write the next email", onClick: () => document.getElementById(`draft-${r.contact_id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }) },
         { label: "RETOUCH", c1: "#f0b050", c2: "#d08820", disabled: dis, title: "Retouch in 3 days", onClick: () => onAct("retouch_set", { days: 3 }) },
         { label: "REVIEWED", c1: "#70c878", c2: "#3e9a4a", disabled: dis, title: "Mark reviewed (r)", onClick: () => onAct("reviewed") },
@@ -3187,6 +3221,48 @@ type ObAccount = {
   retouch_on: string | null; sqa_info?: string;
 };
 
+function ObTag({ s }: { s: Sig }) {
+  const col = OB_SIG[s.sig]?.color ?? (s.sig === "Single-threaded" ? "#f783ac" : "#8b949e");
+  const g = UI.game;
+  return (
+    <span title={s.handled ? "Touched since" : ""} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: fs(g ? 11.5 : 10.5), padding: g ? "2px 8px" : "1px 7px",
+      borderRadius: g ? 999 : 3, border: `1px solid ${g ? col + "aa" : col + "55"}`, color: g ? shade(col, 0.45) : col, background: g ? `${col}22` : `${col}14`,
+      fontWeight: g ? 600 : 400, whiteSpace: "nowrap", opacity: s.handled ? 0.5 : 1, textDecoration: s.handled ? "line-through" : "none" }}>
+      <span style={{ width: 7, height: 7, borderRadius: 999, background: col }} />{s.sig}
+    </span>
+  );
+}
+// One account in the Outbound list (memoized like FeedRow)
+const ObRow = memo(function ObRow({ a, on, accent, aeText, onSelect }: { a: ObAccount; on: boolean; accent: string; aeText: string; onSelect: (id: string) => void }) {
+  const d = daysSince(a.last_touch);
+  const g = UI.game;
+  const hot = Array.from(new Map(a.signals.filter((s) => !s.handled).map((s) => [s.sig, s])).values());
+  return (
+    <div className="bdr-row" data-on={on ? "1" : "0"} role="button" tabIndex={0} aria-pressed={on} aria-label={a.company}
+      onClick={() => onSelect(a.company_id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(a.company_id); } }}
+      style={{ display: "flex", gap: 10, padding: g ? "12px 12px 12px 14px" : "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
+        borderLeft: `4px solid ${on ? (g ? accent : C.accent) : "transparent"}`, background: on ? (g ? `${accent}17` : C.surfaceAlt) : undefined }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: SP.sm }}>
+          <span style={{ fontSize: fs(g ? 15 : 12.5), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{g && on ? "▶ " : ""}{a.company}</span>
+          <span style={{ fontSize: fs(g ? 12 : 10), fontWeight: g ? 600 : 400, color: d == null ? C.faint : d > 7 ? C.danger : C.faint, flexShrink: 0, whiteSpace: "nowrap" }}>{d == null ? "untouched" : `${d}d ago`}</span>
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: g ? 6 : 3 }}>
+          {hot.slice(0, 2).map((s) => <ObTag key={s.sig} s={s} />)}
+          {hot.length > 2 && <span style={{ fontSize: fs(11.5), color: C.faint }}>+{hot.length - 2}</span>}
+          {a.retouch_on && <span style={{ fontSize: fs(11.5), color: C.warn }}>↻ {a.retouch_on}</span>}
+        </div>
+        <div style={{ fontSize: fs(g ? 12.5 : 10.5), color: C.faint, marginTop: g ? 6 : 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {a.segment || "—"} · {a.worked}/{a.contacts.length} worked · AE {aeText}{a.play ? ` · ${a.play}` : ""}
+        </div>
+      </div>
+      <div className="bdr-row-links" style={{ flexShrink: 0 }}>
+        {!a.company_id.startsWith("nocompany") && <a href={HS_COMPANY(a.company_id)} target="_blank" rel="noopener noreferrer" onClick={stopClick} title="HubSpot company" aria-label="Open company in HubSpot" style={miniLink("#ff7a59")}>HS</a>}
+      </div>
+    </div>
+  );
+});
+
 function OutboundFeed() {
   const [acting] = useDiveState<string>("acting", "89400804");
   const [owners] = useDiveState<string[]>("owners", ["89400804"]);
@@ -3356,19 +3432,18 @@ function OutboundFeed() {
   ];
   const obClear = () => { setSearch(""); setAeFilter("any"); setSegFilter("any"); setPlayFilter("any"); setObLiF("any"); setShowPost(false); };
   const cur = rows.find((a) => a.company_id === selected) ?? rows[0];
+  const acctApi = useRef({ setSelected, setDraftFor });
+  acctApi.current = { setSelected, setDraftFor };
+  const onSelectAcct = useCallback((id: string) => { acctApi.current.setSelected(id); acctApi.current.setDraftFor(null); }, []);
   const loading = !accounts.length && (q.isLoading || ovQ.isLoading);
   const [obShown, setObShown] = useState(50);
 
-  const ObTag = ({ s }: { s: Sig }) => {
-    const col = OB_SIG[s.sig]?.color ?? (s.sig === "Single-threaded" ? "#f783ac" : C.muted);
-    return <span title={s.handled ? "Touched since" : ""} style={{ fontSize: fs(10.5), padding: UI.solid ? "2px 9px" : "1px 7px", borderRadius: UI.solid ? 999 : 3, border: `1px solid ${UI.game ? "#9a9a9a" : col + "55"}`, color: UI.game ? C.text : col, background: UI.game ? "#ffffff" : `${col}14`, fontWeight: 400, whiteSpace: "nowrap", opacity: s.handled ? 0.45 : 1, textDecoration: s.handled ? "line-through" : "none" }}>{UI.game && <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: 2, background: col, marginRight: 5 }} />}{s.sig}</span>;
-  };
 
   return (
     <div className="bdr-page" style={{ background: UI.game ? "transparent" : C.page, color: C.text, fontFamily: UI.body }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: SP.md, marginBottom: SP.lg }}>
         <div>
-          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: C.accent, fontWeight: 600 }}>BDR TERMINAL // OUTBOUND</div>
+          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: trainerInk(), fontWeight: 700 }}>BDR TERMINAL // OUTBOUND</div>
           <PageTitle text="Accounts" />
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {loading ? "loading…" : `${scoped.length} accounts · ${scoped.reduce((n, a) => n + a.contacts.length, 0)} Apollo contacts · ${counts.hot ?? 0} hot · ${counts.followup ?? 0} need follow-up`}
@@ -3407,31 +3482,13 @@ function OutboundFeed() {
       {q.isError ? <div style={{ color: C.danger, fontSize: fs(12) }}>{String(q.error)}</div> : (
         <div className="bdr-split">
           <div className="bdr-list" style={{ ...PANEL(), overflowY: "auto", overscrollBehavior: "contain" }}>
-            {loading ? <div style={{ padding: 12 }}>{Array.from({ length: 8 }).map((_, i) => <div key={i} className="animate-pulse" style={{ height: 46, background: C.surfaceAlt, borderRadius: UI.radius2, marginBottom: 8 }} />)}</div>
-              : rows.length === 0 ? <div style={{ padding: 16, fontSize: fs(12), color: C.muted }}>Nothing here.</div>
-              : rows.slice(0, obShown).map((a) => {
-                const on = cur?.company_id === a.company_id;
-                const d = daysSince(a.last_touch);
-                return (
-                  <div key={a.company_id} onClick={() => { setSelected(a.company_id); setDraftFor(null); }} style={{ padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
-                    borderLeft: `3px solid ${on ? C.accent : "transparent"}`, background: on ? (UI.game ? C.accentDim : C.surfaceAlt) : "transparent" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                      <span style={{ fontSize: fs(12.5), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{UI.game && on ? "▶ " : ""}{a.company}</span>
-                      <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
-                        {!a.company_id.startsWith("nocompany") && <a href={HS_COMPANY(a.company_id)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title="HubSpot company" style={miniLink("#ff7a59")}>HS</a>}
-                        <span style={{ fontSize: fs(10), color: d == null ? C.faint : d > 7 ? C.danger : C.faint }}>{d == null ? "untouched" : `${d}d`}</span>
-                      </span>
-                    </div>
-                    <div style={{ fontSize: fs(10.5), color: C.muted, margin: "2px 0 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {a.segment || "—"} · {a.worked}/{a.contacts.length} worked · AE {aeLabel(a)}{a.play ? ` · ${a.play}` : ""}
-                    </div>
-                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                      {Array.from(new Map(a.signals.filter((s) => !s.handled).map((s) => [s.sig, s])).values()).slice(0, 3).map((s) => <ObTag key={s.sig} s={s} />)}
-                      {a.retouch_on && <span style={{ fontSize: fs(10), color: C.warn }}>↻ {a.retouch_on}</span>}
-                    </div>
-                  </div>
-                );
-              })}
+            {loading ? <LoadingMon bdr={acting} ob label="Scouting accounts" />
+              : rows.length === 0 ? (obPills.length
+                ? <EmptyMon bdr={acting} ob title="No accounts here!">Nothing matches these filters. <button type="button" onClick={obClear} style={{ border: "none", background: "transparent", color: C.accent, cursor: "pointer", fontWeight: 600, fontSize: "inherit", padding: 0 }}>Clear all filters</button></EmptyMon>
+                : <EmptyMon bdr={acting} ob title={bucket === "hot" ? "All quiet out here" : "No accounts here!"}>{bucket === "hot" ? "No hot accounts right now. Try Follow-up or Untouched." : "Nothing in this bucket right now."}</EmptyMon>)
+              : rows.slice(0, obShown).map((a) => (
+                <ObRow key={a.company_id} a={a} on={cur?.company_id === a.company_id} accent={UI.trainer} aeText={aeLabel(a)} onSelect={onSelectAcct} />
+              ))}
             {!loading && rows.length > obShown && (
               <button onClick={() => setObShown(obShown + 50)} style={{ ...btn(C.accent), margin: 10, width: "calc(100% - 20px)", justifyContent: "center" }}>
                 Show 50 more ({rows.length - obShown} left)
@@ -3439,17 +3496,19 @@ function OutboundFeed() {
             )}
           </div>
 
-          <div>
-            {loading ? <div className="animate-pulse" style={{ height: 460, background: C.surface, borderRadius: UI.radius }} /> : !cur ? <div style={{ fontSize: fs(12), color: C.muted }}>Select an account.</div> : (
-              <div style={{ ...PANEL(), padding: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={{ fontSize: fs(17), fontWeight: 700 }}>{cur.company}</div>
-                    <div style={{ fontSize: fs(11.5), color: C.muted, marginTop: 2 }}>
+          <div className="bdr-detail" style={{ minWidth: 0 }}>
+            {loading ? <div style={{ ...PANEL() }}><LoadingMon bdr={acting} ob label="Getting the account ready" rows={4} rowH={90} /></div>
+              : !cur ? (rows.length ? <div style={{ ...PANEL() }}><EmptyMon bdr={acting} ob title="Pick an account">Choose an account on the left to see its contacts.</EmptyMon></div> : null) : (
+              <div style={{ ...PANEL(), padding: UI.game ? SP.xl : 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: SP.lg, flexWrap: "wrap" }}>
+                  <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+                    <div style={{ fontSize: fs(UI.game ? 21 : 17), fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{cur.company}</div>
+                    <div style={{ display: "flex", gap: SP.sm, flexWrap: "wrap", marginTop: SP.md }}>{Array.from(new Map(cur.signals.filter((x) => !x.handled).map((x) => [x.sig, x])).values()).map((x) => <ObTag key={x.sig} s={x} />)}</div>
+                    <div style={{ fontSize: fs(UI.game ? 13.5 : 11.5), color: C.muted, marginTop: SP.md }}>
                       {[cur.domain, cur.segment, cur.play].filter(Boolean).join(" · ") || "—"}
                       {cur.post_sqa ? ` · post-SQA: ${cur.sqa_info || "qualified deal"}` : ""}
                     </div>
-                    <div style={{ fontSize: fs(11), color: C.faint, marginTop: 2 }}>
+                    <div style={{ fontSize: fs(UI.game ? 12.5 : 11), color: C.faint, marginTop: SP.xs }}>
                       {cur.worked}/{cur.contacts.length} contacts worked · last touch {fmtAgo(cur.last_touch)}{cur.last_by ? ` by ${cur.last_by}` : ""} · queue: {bdrName(cur.owner_id)}
                     </div>
                   </div>
@@ -3482,23 +3541,23 @@ function OutboundFeed() {
                     const dis = !mine || busy;
                     const asRow: any = { ...c, company: cur.company, queue_owner_id: c.owner_id, unhandled: c.signals.filter((s) => !s.handled) };
                     return (
-                      <div key={c.contact_id} style={{ borderBottom: `1px solid ${C.border}`, padding: "8px 0" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+                      <div key={c.contact_id} style={{ borderBottom: `1px solid ${C.border}`, padding: UI.game ? `${SP.lg}px 0` : "8px 0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: SP.sm, flexWrap: "wrap" }}>
                           <div style={{ minWidth: 0 }}>
-                            <div style={{ fontSize: fs(12.5), fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>{c.contact_name || c.email} <LiBadge li={liInfo(c.ov, c.hs_li)} /></div>
-                            <div style={{ fontSize: fs(10.5), color: C.muted }}>{c.title || "—"} · {c.email}</div>
-                            <div style={{ fontSize: fs(10.5), color: C.faint, marginTop: 2 }}>
+                            <div style={{ fontSize: fs(UI.game ? 15 : 12.5), fontWeight: 700, display: "flex", alignItems: "center", gap: 6 }}>{c.contact_name || c.email} <LiBadge li={liInfo(c.ov, c.hs_li)} /></div>
+                            <div style={{ fontSize: fs(UI.game ? 13 : 10.5), color: C.muted, marginTop: 2 }}>{c.title || "—"} · {c.email}</div>
+                            <div style={{ fontSize: fs(UI.game ? 12 : 10.5), color: C.faint, marginTop: SP.xs }}>
                               last touch {fmtAgo(c.last_touch)}{c.last_by ? ` · ${c.last_by} · ${c.last_channel}` : ""} · {c.touches_14d} touches/14d · {c.calls_total} calls ({c.calls_connected} conn){c.in_sequence ? " · in sequence" : ""}
                             </div>
                             {liInfo(c.ov, c.hs_li).stage > 0 && <div style={{ marginTop: 3 }}><LiTimeline li={liInfo(c.ov, c.hs_li)} /></div>}
                           </div>
                           <div style={{ display: "flex", gap: 4, alignItems: "flex-start", flexWrap: "wrap" }}>
-                            <a href={HS_CONTACT(c.contact_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none", padding: "2px 7px" }}>HS</a>
-                            {c.linkedin_url && <a href={c.linkedin_url} target="_blank" rel="noopener noreferrer" style={{ ...btn("#5fb3ff"), textDecoration: "none", padding: "2px 7px" }}><Linkedin size={11} /></a>}
-                            <button style={{ ...btn(C.accent), padding: "2px 7px" }} onClick={() => setDraftFor(draftFor === c.contact_id ? null : c.contact_id)}><Sparkles size={11} /> Draft</button>
+                            <a href={HS_CONTACT(c.contact_id)} target="_blank" rel="noopener noreferrer" aria-label="Open contact in HubSpot" style={{ ...btn("#ff7a59"), textDecoration: "none" }}>HS</a>
+                            {c.linkedin_url && <a href={c.linkedin_url} target="_blank" rel="noopener noreferrer" aria-label="Open LinkedIn" style={{ ...btn("#5fb3ff"), textDecoration: "none" }}><Linkedin size={13} /></a>}
+                            <button style={btn(C.accent)} onClick={() => setDraftFor(draftFor === c.contact_id ? null : c.contact_id)}><Sparkles size={13} /> Draft</button>
                           </div>
                         </div>
-                        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: SP.sm }}>
                           {c.signals.map((s) => <ObTag key={s.sig} s={s} />)}
                         </div>
                         <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 5 }}>
@@ -3531,8 +3590,10 @@ function OutboundFeed() {
 
 // One contact in the Signal Feed list. Memoized: only re-renders when its own data or selection changes.
 const stopClick = (e: any) => e.stopPropagation();
-const FeedRow = memo(function FeedRow({ r, on, drafted, multiOwner, ov, onSelect, onToggleDraft }:
-  { r: Row; on: boolean; drafted: boolean; multiOwner: boolean; ov?: Ov; onSelect: (id: string) => void; onToggleDraft: (id: string) => void }) {
+const FeedRow = memo(function FeedRow({ r, on, drafted, multiOwner, ov, accent, onSelect, onToggleDraft }:
+  { r: Row; on: boolean; drafted: boolean; multiOwner: boolean; ov?: Ov; accent: string; onSelect: (id: string) => void; onToggleDraft: (id: string) => void }) {
+  const touches = r.touches_14d + (r.ov?.linkedin_14d ?? 0);
+  const hp = Math.min(100, Math.round((touches / CADENCE_TARGET_14D) * 100));
   const lead = r.unhandled[0] ?? r.signals[0];
   const more = r.signals.length - 1;
   const d = daysSince(r.last_touch);
@@ -3542,7 +3603,7 @@ const FeedRow = memo(function FeedRow({ r, on, drafted, multiOwner, ov, onSelect
     <div className="bdr-row" data-on={on ? "1" : "0"} role="button" tabIndex={0} aria-pressed={on} aria-label={`${name}${lead ? `, ${lead.sig}` : ""}`}
       onClick={() => onSelect(r.contact_id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(r.contact_id); } }}
       style={{ display: "flex", gap: g ? 10 : 8, alignItems: "flex-start", padding: g ? "12px 12px 12px 10px" : "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
-        borderLeft: `4px solid ${on ? (g ? C.accent : sigMeta(lead?.sig ?? "").color) : "transparent"}`, background: on ? (g ? C.accentDim : C.surfaceAlt) : undefined }}>
+        borderLeft: `4px solid ${on ? (g ? accent : sigMeta(lead?.sig ?? "").color) : "transparent"}`, background: on ? (g ? `${accent}17` : C.surfaceAlt) : undefined }}>
       <input type="checkbox" checked={drafted} onClick={stopClick} onChange={() => onToggleDraft(r.contact_id)} aria-label={`Select ${name} for AI draft`}
         style={{ width: 16, height: 16, margin: g ? "3px 0 0" : "2px 0 0", cursor: "pointer", flexShrink: 0 }} />
       {multiOwner && (
@@ -3565,6 +3626,14 @@ const FeedRow = memo(function FeedRow({ r, on, drafted, multiOwner, ov, onSelect
           {r.last_by && r.last_by_id !== r.queue_owner_id ? ` · last: ${r.last_by}` : ""}
           {r.ov?.retouch_on ? ` · ↻ ${r.ov.retouch_on}` : ""}
         </div>
+        {g && touches > 0 && (
+          <div title={`Cadence: ${touches}/${CADENCE_TARGET_14D} touches in 14 days`} style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+            <span style={{ fontSize: fs(9.5), fontWeight: 800, color: C.faint, letterSpacing: 0.5 }}>HP</span>
+            <div style={{ flex: 1, maxWidth: 120, height: 4, borderRadius: 2, background: "#e7eaee", overflow: "hidden" }}>
+              <div style={{ width: `${hp}%`, height: "100%", background: hp >= 100 ? "#48c050" : hp >= 50 ? "#f0c030" : "#f05030" }} />
+            </div>
+          </div>
+        )}
       </div>
       <div className="bdr-row-links" style={{ display: "flex", flexDirection: "column", gap: SP.xs, flexShrink: 0 }}>
         <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" onClick={stopClick} title="Open in HubSpot (h)" aria-label="Open in HubSpot" style={miniLink("#ff7a59")}>HS</a>
@@ -3858,7 +3927,7 @@ function SignalFeed() {
     <div className="bdr-page" style={{ background: UI.game ? "transparent" : C.page, color: C.text, minHeight: "100%", fontFamily: UI.body }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: SP.md, marginBottom: SP.lg }}>
         <div>
-          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: C.accent, fontWeight: 600 }}>BDR TERMINAL // INBOUND</div>
+          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: trainerInk(), fontWeight: 700 }}>BDR TERMINAL // INBOUND</div>
           <PageTitle text="Signal Feed" />
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {firstLoad ? "loading…" : `${scoped.length} contacts in scope · ${bucketCounts.active ?? 0} active · ${bucketCounts.retouch_due ?? 0} retouch due`}
@@ -3929,13 +3998,13 @@ function SignalFeed() {
         <div className="bdr-split">
           <div className="bdr-list" style={{ ...PANEL(), overflowY: "auto", overscrollBehavior: "contain" }}>
             {firstLoad ? (
-              <div style={{ padding: 12 }}>
-                {Array.from({ length: 8 }).map((_, i) => <div key={i} className="animate-pulse" style={{ height: 46, background: C.surfaceAlt, borderRadius: UI.radius2, marginBottom: 8 }} />)}
-              </div>
+              <LoadingMon bdr={acting} ob={false} label="Searching the tall grass for leads" />
             ) : sorted.length === 0 ? (
-              <div style={{ padding: 16, fontSize: fs(12), color: C.muted }}>Nothing here. {bucket === "active" ? "Queue clear — nice." : ""}</div>
+              pills.length
+                ? <EmptyMon bdr={acting} ob={false} title="No wild leads here!">Nothing matches these filters. <button type="button" onClick={() => { resetFilters(); setShowPost(false); }} style={{ border: "none", background: "transparent", color: C.accent, cursor: "pointer", fontWeight: 600, fontSize: "inherit", padding: 0 }}>Clear all filters</button></EmptyMon>
+                : <EmptyMon bdr={acting} ob={false} title={bucket === "active" ? "Queue clear!" : "No wild leads here!"}>{bucket === "active" ? "Every live signal has been answered. Nice work." : "Nothing in this bucket right now."}</EmptyMon>
             ) : sorted.slice(0, shown).map((r) => (
-              <FeedRow key={r.contact_id} r={r} on={current?.contact_id === r.contact_id} drafted={draftIds.has(r.contact_id)} multiOwner={multiOwner}
+              <FeedRow key={r.contact_id} r={r} on={current?.contact_id === r.contact_id} drafted={draftIds.has(r.contact_id)} multiOwner={multiOwner} accent={UI.trainer}
                 onSelect={onSelectRow} onToggleDraft={onToggleDraftRow} />
             ))}
             {!firstLoad && sorted.length > shown && (
@@ -3945,9 +4014,9 @@ function SignalFeed() {
             )}
           </div>
           <div className="bdr-detail" style={{ minWidth: 0 }}>
-            {firstLoad ? <div className="animate-pulse" style={{ height: 460, background: C.surface, borderRadius: UI.radius }} />
+            {firstLoad ? <div style={{ ...PANEL() }}><LoadingMon bdr={acting} ob={false} label="Getting the contact card ready" rows={4} rowH={90} /></div>
               : current ? <Card key={current.contact_id} r={current} acting={acting} busy={busy} onAct={(t, x) => act(current, t, x)} runMsg={aq.msg} pendingKeys={aq.pendingKeys} stuck={aq.stuck} onRetry={aq.retry} />
-              : <div style={{ fontSize: fs(12), color: C.muted }}>Select a contact.</div>}
+              : sorted.length ? <div style={{ ...PANEL() }}><EmptyMon bdr={acting} ob={false} title="Pick a lead">Choose a contact on the left to see their card.</EmptyMon></div> : null}
           </div>
         </div>
       )}
@@ -4003,6 +4072,7 @@ export default function BdrTerminal() {
   const [uiSize, setUiSize] = useDiveState<string>("uiSize", "m");
   const [showSettings, setShowSettings] = useState(false);
   applyTheme(theme === "terminal" ? "terminal" : "unova", uiSize);
+  UI.trainer = trainerOf(acting).color;
   const game = UI.game;
   const me = bdrName(acting);
   const TABS: [string, string, string][] = [["feed", "▤ SIGNAL FEED", "INBOUND"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
@@ -4016,9 +4086,9 @@ export default function BdrTerminal() {
         {TABS.map(([id, label, short]) => {
           const on = tab === id;
           return game ? (
-            <button key={id} onClick={() => setTab(id)} style={{ padding: "7px 16px", fontFamily: UI.body, fontSize: fs(13), fontWeight: 700, cursor: "pointer", letterSpacing: 1,
-              border: "2px solid #484848", borderRadius: 6, background: on ? "#3878c8" : "#ffffff", color: on ? "#ffffff" : "#303030",
-              boxShadow: on ? "inset 0 -3px 0 #2858a0" : "inset 0 -3px 0 #d0d0d0" }}>{on ? "▶ " : ""}{short}</button>
+            <button key={id} onClick={() => setTab(id)} aria-current={on ? "page" : undefined} style={{ padding: "7px 16px", minHeight: 40, fontFamily: UI.body, fontSize: fs(13), fontWeight: 700, cursor: "pointer", letterSpacing: 1,
+              border: "2px solid #484848", borderRadius: 8, background: on ? UI.trainer : "#ffffff", color: on ? inkOn(UI.trainer) : "#303030",
+              boxShadow: on ? `inset 0 -3px 0 ${shade(UI.trainer, 0.3)}` : "inset 0 -3px 0 #d0d0d0" }}>{on ? "▶ " : ""}{short}</button>
           ) : (
             <button key={id} onClick={() => setTab(id)} style={{
               padding: "6px 14px", fontSize: fs(11.5), fontFamily: UI.body, cursor: "pointer", letterSpacing: 1,
