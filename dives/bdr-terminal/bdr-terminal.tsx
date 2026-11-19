@@ -33,22 +33,29 @@ const THEME_TERMINAL = {
   danger: "#ff6b5b", warn: "#ffd43b", ok: "#69db7c",
 };
 const THEME_UNOVA = {
-  page: "#f0f0f0", surface: "#ffffff", surfaceAlt: "#f2f2f2", border: "#c8c8c8",
-  text: "#303030", muted: "#585858", faint: "#888888", accent: "#3878c8", accentDim: "#dce8f8",
-  danger: "#d84040", warn: "#c87810", ok: "#3a9a4a",
+  page: "#f3f4f6", surface: "#ffffff", surfaceAlt: "#f6f7f9", border: "#d5d9df",
+  text: "#1f2329", muted: "#4f5762", faint: "#7c8591", accent: "#3878c8", accentDim: "#e3edf9",
+  danger: "#c93636", warn: "#b86e0a", ok: "#2f8a40",
 };
 const C: any = { ...THEME_UNOVA };
 // typography / shape tokens; mutated by applyTheme() at the top of every render
-// Dives load no external fonts (only sans / serif / mono), so the game theme uses the mono stack
+// Dives load no external fonts (only sans / serif / mono). Body text uses the sans stack (Inter when the viewer
+// has it installed); "game moments" use <PixelText>, a bitmap font drawn in SVG, or the mono stack for long lines.
+const FONT_SANS = 'Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif';
 const FONT_GAME = 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+// spacing scale: use these instead of ad-hoc numbers
+const SP = { xs: 4, sm: 8, md: 12, lg: 16, xl: 24, xxl: 32 } as const;
+const TAP = 32; // minimum tap target (px)
 const UI: any = {
-  game: true, solid: true, scale: 1.15, radius: 14, radius2: 8,
-  body: FONT_GAME,
+  game: true, solid: true, scale: 1, radius: 10, radius2: 8,
+  body: FONT_SANS,
   pixel: FONT_GAME,
-  bg: "linear-gradient(180deg, #fafafa 0%, #ececec 100%)",
+  bg: "#f3f4f6",
 };
 const fs = (n: number) => Math.round(n * UI.scale * 2) / 2;
-const FONT_CSS = `.bdr-root button:active { transform: translateY(1px); }
+const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialiased; }
+.bdr-root button:active { transform: translateY(1px); }
+.bdr-root button:focus-visible, .bdr-root a:focus-visible, .bdr-root [tabindex]:focus-visible { outline: 2px solid #3878c8; outline-offset: 2px; }
 .bdr-root select, .bdr-root input, .bdr-root textarea { outline-color: #3878c8; }
 .bdr-root ::selection { background: #3878c8; color: #fff; }
 @keyframes bdrSpin{to{transform:rotate(360deg)}} @keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
@@ -678,31 +685,33 @@ function derive(r: Row, ov: Ov | undefined): Row {
 
 // ---- small UI pieces ----
 const makeCtl = (): any => ({
-  background: C.surfaceAlt, color: C.text, border: `1px solid ${C.border}`, borderRadius: UI.radius2,
-  padding: UI.game ? "6px 10px" : "5px 8px", fontSize: fs(11.5), fontFamily: "inherit",
+  background: UI.game ? C.surface : C.surfaceAlt, color: C.text, border: `1px solid ${C.border}`, borderRadius: UI.radius2,
+  padding: UI.game ? "6px 12px" : "5px 8px", fontSize: fs(13), fontFamily: "inherit", minHeight: UI.game ? TAP : 28, boxSizing: "border-box", lineHeight: 1.3,
 });
 const ctl: any = makeCtl();
 const PANEL = (): any => (UI.game
-  ? { background: "#ffffff", border: "3px solid #484848", borderRadius: 8, boxShadow: "inset 0 0 0 2px #e2e2e2" }
-  : { ...PANEL() });
+  ? { background: C.surface, border: `1px solid ${C.border}`, borderRadius: UI.radius, boxShadow: "0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.04)" }
+  : { background: C.surface, border: `1px solid ${C.border}`, borderRadius: UI.radius });
+// framed "game" panel (dialogs, battle boxes): the chunky outline is reserved for game moments
+const GAME_PANEL = (): any => ({ background: "#ffffff", border: "3px solid #484848", borderRadius: 8, boxShadow: "inset 0 0 0 2px #e2e2e2" });
 const DIALOG = (): any => ({ background: "#ffffff", border: "3px solid #484848", boxShadow: "inset 0 0 0 2px #cfcfcf", borderRadius: 8,
-  padding: "12px 16px", fontFamily: UI.body, fontSize: fs(14), lineHeight: 1.6, color: "#303030", position: "relative" });
+  padding: `${SP.md}px ${SP.lg}px`, fontFamily: FONT_GAME, fontSize: fs(14), lineHeight: 1.6, color: "#303030", position: "relative" });
 function applyTheme(theme: string, size: string) {
   const unova = theme !== "terminal";
   Object.assign(C, unova ? THEME_UNOVA : THEME_TERMINAL);
   Object.assign(GB, unova ? GB_UNOVA : GB_CLASSIC);
   UI.game = unova; UI.solid = false;
-  UI.radius = unova ? 8 : 6; UI.radius2 = unova ? 6 : 4;
-  UI.scale = (unova ? 1.2 : 1) * (size === "s" ? 0.92 : size === "l" ? 1.14 : 1);
-  UI.body = unova ? FONT_GAME : "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-  UI.pixel = UI.body;
-  UI.bg = unova ? "linear-gradient(180deg, #fafafa 0%, #ececec 100%)" : C.page;
+  UI.radius = unova ? 10 : 6; UI.radius2 = unova ? 8 : 4;
+  UI.scale = size === "s" ? 0.92 : size === "l" ? 1.14 : 1;
+  UI.body = unova ? FONT_SANS : FONT_GAME;
+  UI.pixel = FONT_GAME;
+  UI.bg = unova ? C.page : C.page;
   Object.assign(ctl, makeCtl());
 }
 const btn = (color: string, disabled = false): any => (UI.game ? {
-  ...ctl, cursor: disabled ? "not-allowed" : "pointer", color: disabled ? C.faint : C.text, border: "2px solid #686868",
-  background: disabled ? "#f2f2f2" : "#ffffff", boxShadow: disabled ? "none" : `inset 0 -3px 0 ${color}`,
-  display: "inline-flex", alignItems: "center", gap: 5, opacity: disabled ? 0.6 : 1, fontWeight: 600,
+  ...ctl, cursor: disabled ? "not-allowed" : "pointer", color: disabled ? C.faint : C.text, border: `1px solid ${disabled ? C.border : "#9aa1ab"}`,
+  background: disabled ? C.surfaceAlt : C.surface, boxShadow: disabled ? "none" : `inset 0 -3px 0 ${color}`,
+  display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 6, opacity: disabled ? 0.6 : 1, fontWeight: 600,
 } : {
   ...ctl, cursor: disabled ? "not-allowed" : "pointer", color: disabled ? C.faint : color,
   borderColor: disabled ? C.border : `${color}66`, background: disabled ? C.surfaceAlt : `${color}12`,
@@ -710,10 +719,119 @@ const btn = (color: string, disabled = false): any => (UI.game ? {
 });
 
 const miniLink = (c: string): any => ({
-  display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: 22, height: 18, padding: "0 4px",
-  fontSize: fs(9), fontWeight: 700, borderRadius: 3, textDecoration: "none", cursor: "pointer",
-  border: UI.game ? "1px solid #888888" : `1px solid ${c}66`, color: UI.game ? "#484848" : c, background: UI.game ? "#ffffff" : `${c}14`,
+  display: "inline-flex", alignItems: "center", justifyContent: "center", minWidth: UI.game ? TAP : 22, height: UI.game ? TAP : 18, padding: "0 6px",
+  fontSize: fs(UI.game ? 11 : 9), fontWeight: 700, borderRadius: UI.game ? UI.radius2 : 3, textDecoration: "none", cursor: "pointer", boxSizing: "border-box",
+  border: UI.game ? `1px solid ${C.border}` : `1px solid ${c}66`, color: UI.game ? C.muted : c, background: UI.game ? C.surface : `${c}14`,
 });
+
+// ---- Pixel font: original 5x7 bitmap glyphs drawn as one SVG path (Dives can't load font files) ----
+// For short game moments only: page titles, creature names, level badges, XP pop-ups. Integer scaling keeps edges crisp.
+const PX_GLYPHS: Record<string, string> = {
+  "A": ".###.|#...#|#...#|#####|#...#|#...#|#...#",
+  "B": "####.|#...#|#...#|####.|#...#|#...#|####.",
+  "C": ".###.|#...#|#....|#....|#....|#...#|.###.",
+  "D": "####.|#...#|#...#|#...#|#...#|#...#|####.",
+  "E": "#####|#....|#....|####.|#....|#....|#####",
+  "F": "#####|#....|#....|####.|#....|#....|#....",
+  "G": ".###.|#...#|#....|#.###|#...#|#...#|.####",
+  "H": "#...#|#...#|#...#|#####|#...#|#...#|#...#",
+  "I": "###|.#.|.#.|.#.|.#.|.#.|###",
+  "J": "..###|...#.|...#.|...#.|#..#.|#..#.|.##..",
+  "K": "#...#|#..#.|#.#..|##...|#.#..|#..#.|#...#",
+  "L": "#....|#....|#....|#....|#....|#....|#####",
+  "M": "#...#|##.##|#.#.#|#.#.#|#...#|#...#|#...#",
+  "N": "#...#|#...#|##..#|#.#.#|#..##|#...#|#...#",
+  "O": ".###.|#...#|#...#|#...#|#...#|#...#|.###.",
+  "P": "####.|#...#|#...#|####.|#....|#....|#....",
+  "Q": ".###.|#...#|#...#|#...#|#.#.#|#..#.|.##.#",
+  "R": "####.|#...#|#...#|####.|#.#..|#..#.|#...#",
+  "S": ".####|#....|#....|.###.|....#|....#|####.",
+  "T": "#####|..#..|..#..|..#..|..#..|..#..|..#..",
+  "U": "#...#|#...#|#...#|#...#|#...#|#...#|.###.",
+  "V": "#...#|#...#|#...#|#...#|#...#|.#.#.|..#..",
+  "W": "#...#|#...#|#...#|#.#.#|#.#.#|#.#.#|.#.#.",
+  "X": "#...#|#...#|.#.#.|..#..|.#.#.|#...#|#...#",
+  "Y": "#...#|#...#|.#.#.|..#..|..#..|..#..|..#..",
+  "Z": "#####|....#|...#.|..#..|.#...|#....|#####",
+  "0": ".###.|#...#|#..##|#.#.#|##..#|#...#|.###.",
+  "1": "..#..|.##..|..#..|..#..|..#..|..#..|.###.",
+  "2": ".###.|#...#|....#|...#.|..#..|.#...|#####",
+  "3": "####.|....#|....#|.###.|....#|....#|####.",
+  "4": "...#.|..##.|.#.#.|#..#.|#####|...#.|...#.",
+  "5": "#####|#....|####.|....#|....#|#...#|.###.",
+  "6": "..##.|.#...|#....|####.|#...#|#...#|.###.",
+  "7": "#####|....#|...#.|..#..|.#...|.#...|.#...",
+  "8": ".###.|#...#|#...#|.###.|#...#|#...#|.###.",
+  "9": ".###.|#...#|#...#|.####|....#|...#.|.##..",
+  " ": "...|...|...|...|...|...|...",
+  ".": ".|.|.|.|.|.|#",
+  ",": "..|..|..|..|..|.#|#.",
+  ":": ".|.|#|.|.|#|.",
+  "!": "#|#|#|#|#|.|#",
+  "?": ".###.|#...#|....#|...#.|..#..|.....|..#..",
+  "-": "...|...|...|###|...|...|...",
+  "+": ".....|..#..|..#..|#####|..#..|..#..|.....",
+  "/": "....#|....#|...#.|..#..|.#...|#....|#....",
+  "'": "#|#|.|.|.|.|.",
+  "\u00d7": ".....|#...#|.#.#.|..#..|.#.#.|#...#|.....",
+  "#": ".#.#.|#####|.#.#.|.#.#.|.#.#.|#####|.#.#.",
+  "%": "##..#|##..#|...#.|..#..|.#...|#..##|#..##",
+  "(": ".#|#.|#.|#.|#.|#.|.#",
+  ")": "#.|.#|.#|.#|.#|.#|#.",
+  "\u2192": ".....|..#..|...#.|#####|...#.|..#..|.....",
+  "\u2726": "..#..|..#..|.###.|#####|.###.|..#..|..#..",
+  "\u25b2": ".....|..#..|.###.|#####|.....|.....|.....",
+  "\u25b6": "#....|##...|###..|####.|###..|##...|#....",
+  "\u2665": ".....|.#.#.|#####|#####|.###.|..#..|....."
+};
+const pxCache = new Map<string, { d: string; w: number }>();
+function pixelPath(text: string) {
+  const hit = pxCache.get(text);
+  if (hit) return hit;
+  let x = 0, d = "";
+  for (const ch of text.toUpperCase()) {
+    const rows = (PX_GLYPHS[ch] ?? PX_GLYPHS[" "]).split("|");
+    rows.forEach((row, y) => {
+      for (let i = 0; i < row.length; ) {
+        if (row[i] !== "#") { i++; continue; }
+        let n = 1; while (row[i + n] === "#") n++;
+        d += `M${x + i} ${y}h${n}v1h-${n}z`;
+        i += n;
+      }
+    });
+    x += rows[0].length + 1;
+  }
+  const out = { d, w: Math.max(1, x - 1) };
+  if (pxCache.size > 400) pxCache.clear();
+  pxCache.set(text, out);
+  return out;
+}
+// px = target cap height; rounds to whole screen pixels per font pixel (min 1)
+function PixelText({ text, px = 14, color = "currentColor", shadow, title }: { text: string; px?: number; color?: string; shadow?: string; title?: string }) {
+  const k = Math.max(1, Math.round(px / 7));
+  const { d, w } = pixelPath(text);
+  return (
+    <svg role="img" aria-label={title ?? text} width={(w + (shadow ? 1 : 0)) * k} height={(7 + (shadow ? 1 : 0)) * k} viewBox={`0 0 ${w + (shadow ? 1 : 0)} ${7 + (shadow ? 1 : 0)}`}
+      shapeRendering="crispEdges" style={{ display: "inline-block", verticalAlign: "middle", overflow: "visible", flexShrink: 0 }}>
+      <title>{title ?? text}</title>
+      {shadow && <path d={d} fill={shadow} transform="translate(1 1)" />}
+      <path d={d} fill={color} />
+    </svg>
+  );
+}
+
+// Page title: pixel type in the game theme, plain bold mono in Terminal
+function PageTitle({ text }: { text: string }) {
+  return (
+    <h1 style={{ margin: UI.game ? `${SP.sm}px 0 ${SP.sm}px` : "2px 0 0", lineHeight: 1, fontSize: UI.game ? undefined : 21, fontWeight: 800 }}>
+      {UI.game ? <PixelText text={text} px={fs(24)} color={C.text} shadow="#cfd4db" /> : text}
+    </h1>
+  );
+}
+// Level badge, e.g. "Lv 28", in pixel type
+function LvBadge({ lv, px = 11, color = "#303030" }: { lv: number | string; px?: number; color?: string }) {
+  return UI.game ? <PixelText text={`LV${lv}`} px={fs(px)} color={color} title={`Level ${lv}`} /> : <span style={{ fontSize: fs(px + 1) }}>:L{lv}</span>;
+}
 
 function DialogBox({ children }: any) {
   if (!UI.game) return null;
@@ -1040,7 +1158,6 @@ const CREATURE_PALS = {
   in: { d0: "#2b2d42", d1: "#f08c00", d2: "#5fa8e8", d3: "#ffe066" },   // duck line: yellow body, blue wing
   out: { d0: "#343a40", d1: "#fd7e14", d2: "#b8c4ce", d3: "#ffffff" },  // goose line: white body, grey wing
 };
-const palFor = (ob: boolean, shiny: boolean) => (shiny ? SHINY : UI.game ? (ob ? CREATURE_PALS.out : CREATURE_PALS.in) : GB);
 // grass pad under the creature, like a DS battle platform
 const STAGE = (shiny: boolean): any => ({
   background: `radial-gradient(ellipse 48% 15% at 50% 86%, ${shiny ? "#f0d070" : "#9ad8a8"} 0 66%, ${shiny ? "#c8a030" : "#5aa870"} 67% 80%, rgba(0,0,0,0) 82%)`,
@@ -1049,60 +1166,7 @@ const STAGE = (shiny: boolean): any => ({
 const BATTLE_BG: any = { background: "linear-gradient(180deg, #ffffff 0%, #f0f0f0 50%, #dedede 100%)", borderRadius: 6, padding: 12, border: "2px solid #c8c8c8" };
 const NAMEPLATE: any = { background: "linear-gradient(180deg, #ffffff 0%, #e6e6e6 100%)", border: "2px solid #484848", borderRadius: "4px 4px 22px 4px", padding: "8px 14px", boxShadow: "3px 3px 0 #b0b0b0", alignSelf: "flex-start" };
 const SHINY = { d0: "#3b2500", d1: "#8a5a00", d2: "#e0b030", d3: "#ffe9a8" };
-const SPRITE_PEEP = [
-  "................",
-  "......0000......",
-  ".....033330.....",
-  "....03333330....",
-  "....03303330....",
-  "....033333300...",
-  "....0333333110..",
-  ".....03333000...",
-  "....0333333330..",
-  "...033223333330.",
-  "...032222333330.",
-  "...033223333330.",
-  "....0333333330..",
-  ".....00000000...",
-  "......1..1......",
-  ".....11..11.....",
-];
-const SPRITE_QUACK = [
-  "................",
-  ".....00000......",
-  "....0333330.....",
-  "...033033330....",
-  "...033333330000.",
-  "...03333330111.0",
-  "....0333330000..",
-  ".....033330.....",
-  "..000333333000..",
-  ".03333333333330.",
-  "0333222222333330",
-  "0332222222233330",
-  ".03322222223330.",
-  "..003333333300..",
-  "....00000000....",
-  ".....11...11....",
-];
-const SPRITE_MALLA = [
-  ".....0.00.0.....",
-  "....01011010....",
-  "....00333300....",
-  "...0330333330...",
-  "...033333333000.",
-  "...0333333301110",
-  "....03333330000.",
-  "0....0333330...0",
-  "00..033333330.00",
-  "0200333333333020",
-  "0222332222333220",
-  ".02232222223220.",
-  "..0332222223300.",
-  "...0033333300...",
-  "....00000000....",
-  "....11....11....",
-];
+
 
 const QUARTERS = [
   { id: "FQ4-2026", label: "Q4 FY27", start: "2026-11-01", end: "2027-01-31" },
@@ -1163,10 +1227,11 @@ const currentQuarter = () => {
   return QUARTERS.find((q) => q.start <= d && d <= q.end) ?? QUARTERS[0];
 };
 
+const ART = (id: string) => ["@art:" + id]; // creature art lives in PIXEL_ART_HD_A/B below
 const SPECIES = [
-  { name: "PEEPBIT", map: SPRITE_PEEP, base: { hp: 45, atk: 49, def: 49, spd: 45, spc: 65 }, flavor: "Hatches every quarter. Chirps at anything that signs up." },
-  { name: "QUACKRAFT", map: SPRITE_QUACK, base: { hp: 60, atk: 62, def: 63, spd: 60, spc: 80 }, flavor: "Has learned that a follow-up is worth ten first touches." },
-  { name: "MALLAGON", map: SPRITE_MALLA, base: { hp: 80, atk: 82, def: 83, spd: 80, spc: 100 }, flavor: "Its call can be heard three Slack channels away." },
+  { name: "PEEPBIT", map: ART("Default_in_1"), base: { hp: 45, atk: 49, def: 49, spd: 45, spc: 65 }, flavor: "Hatches every quarter. Chirps at anything that signs up." },
+  { name: "QUACKRAFT", map: ART("Default_in_2"), base: { hp: 60, atk: 62, def: 63, spd: 60, spc: 80 }, flavor: "Has learned that a follow-up is worth ten first touches." },
+  { name: "MALLAGON", map: ART("Default_in_3"), base: { hp: 80, atk: 82, def: 83, spd: 80, spc: 100 }, flavor: "Its call can be heard three Slack channels away." },
 ];
 
 const MOVES = [
@@ -1318,7 +1383,6 @@ const PIXEL_ART_HD_B: Record<string, { w: number; h: number; p: string; r: strin
   Rebecca_out_2: { w: 64, h: 75, p: "f9af38,fc7212,ff6e12,fd6e12,fe6d11,fe5d0b,e95510,f03015,f71607,e5281c,9a1f1f,180728,140224,100123,110020", r: "31.lk31.|31.l2n30.|31.mgon29.|31.mfgl29.|31.l2fgn28.|25.mn3.lh2fgn28.|24.nkon2l4fgn28.|23.nmflm2fe3fln28.|22.nogfjhfba3fmk3n25.|22.nk4fb2a2fim2kmn25.|22.lfb2fb3a2fijhikn25.|22.kf7a2fh3iko25.|22.kf5ab3f3ijm26.|22.kf5ah5ijo27.|21.mkfb3af2hefio3n26.|19.2ol2kf2a2f5edk3n25.|18.nmb2ekhbf7e2cgk2n24.|17.nmb3egjf7e4cfko24.|16.mlb11e5c3eflo23.|16.mlbc9e5c5eg2n22.|15.2n4c7e3c9eln22.|15.2ne2c18e2clml21.|14.lngdk2b6ec3egkg2e4cjnm21.|14.2nblmk6c4egl2nb4cejmn17.no2.|14.2ndoaoe5c4ek2anlb2c2ejmo16.4n.|14.2ndoaoe5c4eo2anl2c3ejmn15.2nj2n.|2.2n10.2nd2nme2c2b3ecd4nm5ehln15.nkg2n.|.4n9.2nb2nleb3ob3cbm3nm3e2chln14.mlgf2n.|.nkgo9.nmbkmldk3bk4bm3nm3ecgjlm13.nlg2f2n.|.okhkn8.nm2bknma4bl2b2dmnmb4e2jln12.nog3fmn.|.nkfgml8.nlb2m2abgk2blod2e3bc2egjln12.nogh2fhml.|.nk2fg2n7.3nl2a7bko2e5cehj2o10.2nogh3fmn2.|.nk2fhg2l5.l3n2a8bko3e4ch2j2o9.n2o2g3fgmo2.|2.n2hf2h2n3.lnb3a7bfg2o4ecbh2jlo8.3n2a5fkna2o|2.nkh3fg2l2.2n9bfgknod4ef3jlm7.2mnl3ai3fg3m2n|2.2ohfhifgm2l.3n8gl2m2bd2e4j2l7.3nk4a2ihgon2ljn|o3nk2fifeg3n.l2no3n2ml10jl2n6.n2ol6a3ikmo2hkm|2o3lgfhi2fgklnk2a4lml2k8j3o5.n2l8a5i3hkmn|2ohfgk2hijh3egko6anlk8jo6.nl3a2b4a4ih2fhi2n.|.nkf4hi4j3e2kl4an10jn5.nl2a2b4ce4i3f2iln2.|.lnk2h2fa6jecgm4am9jg2n3.2n2ab3cdce4a5ilm3.|2.nlj3f2a6j2cg4nke5jd2cdkn3.nbabed4c5a4ilon3.|3.n2lhi3ah5j2eg3lbd4e5cbknonlab3ed2cb4a2il3o5.|3.2mnk2i3a7jcglk4ec4edc2bl3abdec2e2ca2b4im5n3.|3.3nok2iag9jlbce4cdcd2cbkb2a8e7i2h2fh2n3.|3.lj7i8jla3c3d6cbkbd2c7e3abi3h3fmo4.|4.l4if3a6jklbe4cdcd4c3d2ed3c2e5a3if2hlnm5.|5.nl4i4a4jma2ecd6c3d3c3e3ci5a5ilnon6.|6.2nl6i3jklaec3d4c4d5ce3ca6io5n8.|7.n4m3ie2j2lac3dcdc2dec3d4ce2hb2af5h3o10.|9.2lj2i2jkjmoa4c3dcdcdcd2ce2jhe4i7hko10.|8.nm4joljknoa4c3dcdc2d5cjk3j2hlmg4hmn10.|9.o4no3k2mb8cdcd6c2jolj2hjo4n2m11.|11.3nolklmld3c2e2dcd3c6e2jkml2koklnm13.|14.non2mlk2cecd8c5eh3j4kjmn14.|19.nl3ec2dcd3c2ec4e9jo15.|19.noj2ecd6c2e3ce7jhjln15.|20.okjd5cd2ce4c7jhjkn16.|20.2nk2j5ce3c11jkln16.|21.2lk20jl2m17.|22.3nk17jon19.|23.4o14jl2o20.|23.lokjl2mn2om6jln22.|24.2ok2jlno2nml3jl2m22.|25.2n3mn3.m2n2on24.|25.lngk2n5.nlgl24.|22.o2nmlgkno5.nljl24.|17.o2nm4lk3gmn5.nlgln23.|16.2o3kjgd2e3bmn4.nl3bmn22.|16.2nlgd2b2gbegon4.2o5bon21.|17.mnmebgd2bg2o4.2m7bmn20.|18.n3on2bgln4.nl2bdgbedcbon19.|22.2m3n5.obmlgbeg2ob2n19.|32.2o2nm2g4o2n19.|36.m3n24." },
   Rebecca_out_3: { w: 62, h: 81, p: "fdcb66,ffb124,ffa41f,f49922,fe6310,fe400d,f95311,c95121,eb3114,e11c15,b91627,670f25,1b0325,0e0224,0f001f", r: "26.2n34.|18.2n6.3n33.|18.ngo5.nin33.|18.ngn4.2nfn33.|17.nmgn4.ndfm33.|16.nmein3.2ndfm33.|14.2nmejkn.2nogikm33.|13.n2mdekl2nmecj2kn33.|11.nom2dehmnmide3kon33.|10.nm2cfkl2h2dh4kmn34.|9.nmbdfi2hei6knm4.2n29.|8.nmde5f4k3m2n3.noho29.|8.nde5f5kfe2dm2nmnhko29.|7.nmdg4fjg2e3kif2dc3bjko6.2j9.3n9.|6.2nle4fc5bci5ked2jkn5.f2i8.mkhn9.|5.no2lg2fec9b8km5.i2ei6.om3fn9.|4.nm2bl3f11bcln4kmn5.jd2e5.no4fn9.|4.ne2beic13bdl3non6.fdej5.m5fo6.j2.|3.nm2ab2d13bedemnl8.gfi5.m5fio7.j.|2.lod16bd2fdbm11.i5.o7fio6.2j|2.2ng11be7fdb2m15.2o3fb3fin5.i2j|2.2nje9b9fceim15.mj2f2b3fin4.i2ei|2.2nmg8b2g5noifc2en8.2m2n2.nj2f4b2fin3.f3ej|2.nlam7beg2nml2am2fcego7.mkfhn2.n2f5b2fin2.j4ei|2.nkln7bf2na2k2amfebego6.mk2fgm2.lg2b2c2b2fko2.idbei.|2.ni2nb2h4binolfh2ameb2egn6.o4fk2njfbe2k2b2fl3.jfdi2.|2.njlnl2dl2bcomolg2al3b2eln5.oife2fknmjfb3kbc2fn3.a2i3.|2.olgn2a2dhcedgmidahc2bc2e2m5.o2fbcfknm2fb2jkbefin9.|2.nomabdg2eld4bcbc3begkm6.nf3bfk2n2fb2j2bgfm6.4o|2.noab5edld7bc3jln5.nkfbkeckol2fbj2befio4.3nhio|.2nab7edlm5be3jkon5.n2fb2kckoj2f3b3fln3.onhg2fo|2nabd5em2onc4be3jk2o6.n2fbkbckoi2fb5fm3.ok4fmn|oac3dho2lkl2i4e4jkon4.mn.o2febcfkl2fc6fn2.l6fn.|odeg2nmklno2k9jln4.ngo.o3fbgf2h2fb5fm2.l2gebc2fo.|od2o7n2o8jkm5.n2f2o3fc2fkhf2d4fio.ohd3bg2fo.|3o6.mnk9j2n5.n2fgoi2fcfgmhfc5foaomedjcbg2fm.|10.nk7jehn6.nfde2l2fcfinkfc5fnomfc2kcbgfm2.|10.n6j3e2o6.nfcfimkc2fimkce4flnm2fc2kcb2gm2.|9.2n4j5eo7.nic2jmjd3kmkc5f2m2fecjec2f2m2.|9.m10eo8.nifklkd2kl2keif2klm2fe2ce3flm3.|8.oh7e2bem8.okf3kd2kmke5knlgdbe4fkm4.|7.no5ed4beln7.oli3kd2kmki4kmlkdcg4flm5.|6.hncb2d8bem4nol2.n3kmd2km5k2lk2eij2ijmn6.|5.nld12b2g3bd3onal2kmdklki3k2lk2e5klm7.|4.2nda11bge7be3n2kmikmkg2k2lkh6klal2no3n.|3.mdna11b2eb3a6bdn2m3kmg2k2lke6k4nmg2ign.|2.2ndm12bkb3a8bghomkml3klkg5k3oki5fjn.|2.oemh11bgkb2a9b3gdm4klkg4k2no2kg2cbg2fmo.|.2oeog10bdgm9bij2cegdim9k2ml2kidkdb2gmn2.|.oegoecd6beb2go10bf2jbeicel5k3m8kcdfln3.|.ogfofde3bd2b2kgio7b2fc2bjib2ibhl2kmo7k3bcdflo4.|.ogfof2k3bk2b2k2foe6bc2j3b4i3bon5k2eg4kfl2o5.|.ogfm2fk2be2kbk3fm2ebc2fdb2j5id5bnm11kl2n6.|.n2im2fihbkf2k4fkme2cegebf2i2bi2j6bd2l5klonm9.|.nikli2f2ik8fmgecegie2bf3b2jgig5ben5o12.|2.ngjm3f2i8fjm4e3i2fgcdjibcijih2ben17.|2.mkjmi13fklge2def3ijife4bd3m2n17.|3.nl2mi11fi2kl2ie2dijfe2d2ec3bcdhn18.|3.noko2k10f4klk2i4jd3bd2e2dh2o19.|4.omom2k3j4f8k3l2j2ig4ege3o20.|5.o2nm18ko11mn22.|7.3n24kl2n25.|9.2n23kon26.|10.3o18k4o27.|11.4om6kl8k2o29.|12.o2k3m2on2ol7kn30.|13.2m5komlo6kmn30.|14.2n3k2o2ahn4kon31.|15.5o4ahn4o32.|16.o2ho6ao2ho32.|16.o2hn6ao2ho32.|15.no2hm6an2ho32.|14.nmhgo7am2hn32.|8.7mh2e3m4anm2em32.|7.m6hg2e3hmn2aom3eln31.|7.m2he2h2ehmn.3nml2h3ehn31.|7.3o2melmon3.2me3heh2en31.|8.4nm2n5.mdemk2em2en31.|11.o2n6.oe2n2el2oen31.|20.2o.nhl4on31.|23.n2o3.o32." },
 };
-const ART = (id: string) => ["@art:" + id];
 const artCache: Record<string, { w: number; h: number; pal: string[]; runs: number[][] }> = {};
 function getArt(id: string) {
   if (artCache[id]) return artCache[id];
@@ -1333,27 +1397,48 @@ function getArt(id: string) {
   return (artCache[id] = { w: a.w, h: a.h, pal, runs });
 }
 
-function Sprite({ map, pal, scale = 6, flip = false }: { map: string[]; pal: any; scale?: number; flip?: boolean }) {
-  if (map[0]?.startsWith("@art:")) {
-    const a = getArt(map[0].slice(5));
-    if (!a) return null;
-    const raw = (scale * 16) / Math.max(a.w, a.h, 96);
-    const k = raw >= 1 ? Math.floor(raw) : raw; // whole screen pixels per art pixel when enlarged = crisp edges
-    const filter = pal === SHINY ? "sepia(0.55) saturate(1.9) hue-rotate(-12deg) brightness(1.12)"
-      : !UI.game ? "grayscale(1) sepia(1) hue-rotate(45deg) saturate(1.7) brightness(0.85)" : undefined;
-    return (
-      <svg width={a.w * k} height={a.h * k} viewBox={`0 0 ${a.w} ${a.h}`} shapeRendering="crispEdges" style={{ imageRendering: "pixelated" as any, filter }}>
-        {a.runs.map(([x, y, n, c], i) => <rect key={i} x={x} y={y} width={n + 0.02} height={1.02} fill={a.pal[c]} />)}
-      </svg>
-    );
-  }
-  const col: Record<string, string> = { "0": pal.d0, "1": pal.d1, "2": pal.d2, "3": pal.d3 };
-  const w = map[0]?.length || 16, h = map.length || 16;
-  const rects: any[] = [];
-  map.forEach((row, y) => row.split("").forEach((ch, x) => {
-    if (ch !== ".") rects.push(<rect key={`${x}-${y}`} x={flip ? w - 1 - x : x} y={y} width={1.02} height={1.02} fill={col[ch]} />);
-  }));
-  return <svg width={16 * scale} height={(16 * scale * h) / w} viewBox={`0 0 ${w} ${h}`} style={{ imageRendering: "pixelated" as any }}>{rects}</svg>;
+// Creature sprite sized to a slot. h = slot height in px.
+//   fit="line": evolutions keep their relative size (bigger forms look bigger), for showcases and stages
+//   fit="box":  every form fills the slot, for small slots like list rows (~28px)
+// Enlarging uses whole screen pixels per art pixel so edges stay crisp; max-width 100% lets it shrink in narrow containers.
+function Sprite({ map, pal, h = 96, flip = false, fit }: { map: string[]; pal: any; h?: number; flip?: boolean; fit?: "line" | "box" }) {
+  const a = map[0]?.startsWith("@art:") ? getArt(map[0].slice(5)) : null;
+  if (!a) return null;
+  const mode = fit ?? (h <= 48 ? "box" : "line");
+  const raw = h / (mode === "box" ? Math.max(a.w, a.h) : Math.max(a.w, a.h, 96));
+  const k = raw >= 1 ? Math.floor(raw) : raw;
+  const filter = pal === SHINY ? "sepia(0.55) saturate(1.9) hue-rotate(-12deg) brightness(1.12)"
+    : !UI.game ? "grayscale(1) sepia(1) hue-rotate(45deg) saturate(1.7) brightness(0.85)" : undefined;
+  return (
+    <svg width={Math.round(a.w * k)} height={Math.round(a.h * k)} viewBox={`0 0 ${a.w} ${a.h}`} shapeRendering="crispEdges" aria-hidden="true"
+      style={{ imageRendering: "pixelated" as any, filter, maxWidth: "100%", height: "auto", maxHeight: h, display: "block", transform: flip ? "scaleX(-1)" : undefined }}>
+      {a.runs.map(([x, y, n, c], i) => <rect key={i} x={x} y={y} width={n + 0.02} height={1.02} fill={a.pal[c]} />)}
+    </svg>
+  );
+}
+// Fills its container's width up to maxH (Trainer battle stage). Measures with ResizeObserver; integer-scales when enlarging.
+function useBoxWidth<T extends HTMLElement>() {
+  const ref = useRef<T | null>(null);
+  const [w, setW] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([e]) => setW(Math.round(e.contentRect.width)));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w] as const;
+}
+// pad = style for a wrapper hugging the sprite (e.g. the grass platform), so it scales with the creature, not the stage
+function SpriteFill({ map, pal, maxH, minH = 64, pad }: { map: string[]; pal: any; maxH: number; minH?: number; pad?: any }) {
+  const [ref, w] = useBoxWidth<HTMLDivElement>();
+  const padX = pad ? 40 : 0;
+  const h = Math.max(minH, Math.min(maxH, w ? w - padX : maxH)); // creature art is roughly square
+  return (
+    <div ref={ref} style={{ width: "100%", display: "flex", justifyContent: "center", alignItems: "flex-end" }}>
+      <div style={{ ...pad, lineHeight: 0, maxWidth: "100%", boxSizing: "border-box" }}><Sprite map={map} pal={pal} h={h} fit="line" /></div>
+    </div>
+  );
 }
 
 const gen1Stat = (base: number, statExp: number, lv: number, hp = false) => {
@@ -1379,14 +1464,11 @@ function GbBox({ children, style }: any) {
 
 
 // ---- Outbound creature (separate XP: only Apollo-sourced contacts + Outbound-source deals) ----
-const SPRITE_HONK = ["................","................","......000.......",".....03330......",".....030330.....",".....03333000...","......033311110.","......03300000..","......0330......","....003333000...","...03333333330..","..0333222233330.","..0332222223330.","...03333333300..","....000000000...",".....11...11...."];
-const SPRITE_GANDER = [".....000........","....03330.......","....030330......","....0333301110..",".....033300000..",".....0330.......",".....0330...00..","....033300.0220.","..0033333302220.",".033333333322220","0333222222333320","0332222222233330",".03322222223330.","..003333333300..","....00000000....","....11....11...."];
-const SPRITE_SKY = ["...1.000........","..1.03330.......","....030330...00.","....033330111020","00...03330000022","0200.0330...0222","02220.0330.02222","0222200333002222",".022203333333222","..02233333333330","..0332222223330.",".03322222222330.","..0332222233300.","...00333333000..","....00000000....","....11....11...."];
 const DEFAULT_OB_TARGET = 10; // FQ4 policy: 55 inbound + 10 outbound; >100% attainment unlocks only once outbound target is met
 const OB_SPECIES = [
-  { name: "HONKLET", map: SPRITE_HONK, base: { hp: 44, atk: 52, def: 44, spd: 56, spc: 60 }, flavor: "Waddles up to strangers. Usually gets ignored." },
-  { name: "GANDERWING", map: SPRITE_GANDER, base: { hp: 60, atk: 70, def: 58, spd: 72, spc: 75 }, flavor: "Never flies alone; always brings three contacts from the same account." },
-  { name: "SKYGANDER", map: SPRITE_SKY, base: { hp: 80, atk: 92, def: 76, spd: 95, spc: 95 }, flavor: "Its honk reaches the VP of Data before the gatekeeper notices." },
+  { name: "HONKLET", map: ART("Default_out_1"), base: { hp: 44, atk: 52, def: 44, spd: 56, spc: 60 }, flavor: "Waddles up to strangers. Usually gets ignored." },
+  { name: "GANDERWING", map: ART("Default_out_2"), base: { hp: 60, atk: 70, def: 58, spd: 72, spc: 75 }, flavor: "Never flies alone; always brings three contacts from the same account." },
+  { name: "SKYGANDER", map: ART("Default_out_3"), base: { hp: 80, atk: 92, def: 76, spd: 95, spc: 95 }, flavor: "Its honk reaches the VP of Data before the gatekeeper notices." },
 ];
 const OB_MOVES = [
   { lv: 1, name: "LIST BUILD", type: "NORMAL" },
@@ -1402,62 +1484,30 @@ const OB_MOVES = [
 ];
 
 // ---- Per-BDR trainer classes + creature lines (original pixel designs, 24x24) ----
-const CREATURE_MAPS: Record<string, string[]> = {
-  KINDLIT: ["........................", "........................", "........................", "........................", ".......0...0............", "......020.020...........", ".....02200020...........", ".....02222220...........", ".....02222220...........", "....0222222220......0...", "....0222202220.....010..", "....0233302220....0110..", ".....0333222200..01110..", "....03333222222001110...", ".....0002222222211110...", "......022222222221110...", "......022333333221110...", "......02233333322000....", ".......0233333320.......", "........02222220........", ".........0220220........", ".........0220220........", "..........00.00.........", "........................"],
-  BLAZETAIL: ["....0.....0.............", "...020...020............", "...0220..020.......0....", "...0220.0220......010...", "...022200220......010.0.", "...022222220......010010", "...0222222220....0110110", "...0222202220....010110.", "...0222202220...0111110.", "..033333222200..0111110.", "...03333222332000111110.", "...03332233322221111110.", "....0002233222222111110.", ".....02222333322221110..", ".....02233333333221110..", ".....02233333333221110..", "......023333333320000...", "......022233332220......", "......022022220220......", "......022022000220......", "......0220220.0220......", "......0220220.0220......", ".......00.00...00.......", "........................"],
-  PYRALYNX: ["..010...010.............", "..020...020.........0...", "..0220.0220........0100.", "..022200220........01010", "..022222220........00110", "..0222222220..0...011110", "..02222222200010..011110", ".02222202221110..0111110", ".023332021111100.0111110", "..033332111112220111110.", ".0333332211111112211110.", "..000222211111122221110.", ".....022231111333222110.", ".....022333113333322110.", ".....022333333333322110.", "......0233333333332000..", "......02233333333220....", "......02202222220220....", "......02202200220220....", "......02202200220220....", "......02202200220220....", "......02202200220220....", "......02202200220220....", ".......00.00..00.00....."],
-  HOOTLET: ["........................", "........................", "........................", "........................", "......0..........0......", ".....020........020.....", ".....0220......0220.....", ".....02220000002220.....", ".....02222222222220.....", ".....02233322333220.....", "......033333333330......", ".....02331333313320.....", ".....02230333303220.....", ".....02223311332220.....", ".....02233333333220.....", ".....02233333333220.....", ".....02233333333220.....", "......023333333320......", "......022333333220......", ".......0023333200.......", "........011000110.......", "........0110.0110.......", ".........00...00........", "........................"],
-  DUSKOWL: ["....020..........020....", "....0220........0220....", "....02220......02220....", "....022220....022220....", ".....022220..022220.....", ".....02220000002220.....", ".....02002222220020.....", "......003332233300......", ".....00331333313300.....", "....0223313333133220....", "...022223033330322220...", "...022222331133222220...", "...022222333333222220...", "...022223333333322220...", "...022223332323322220...", "...022223333333322220...", "...022223332323322220...", "...022223333333322220...", "....0222233232322220....", ".....00023333332000.....", "........02333320........", "........011000110.......", "........0110.0110.......", ".........00...00........"],
-  NOCTURNEX: [".....020........020.....", ".....0220..00..0220.....", "......022001100220......", "......022211112220......", "......022200002220......", "..0....0200000020....0..", ".020....00222200....020.", ".0220...03322330...0220.", ".0222000331333130002220.", "032222202302230202222230", "033322222221122222223330", ".0333222223113222223330.", ".0333332233333322333330.", ".0333332233333322333330.", ".0333332233333322333330.", ".0333322233333322233330.", "..03322023333332022330..", "..03220023333332002230..", "...020..02333320..020...", "....0....023320....0....", "..........0000..........", ".........010010.........", ".........010010.........", "..........0..0.........."],
-  DRIZZLET: ["........................", "........................", "......0.................", ".....020................", "......020...00..........", "......0220.0220.........", "......022200220...0.....", ".......02330220..010....", "......03333330..0110....", ".....03333333300110.....", "....033333333331110000..", "....0333033333301102220.", "....03330333333000022220", ".....033333333300..00220", ".....0333111333330.00220", "......033333333333022220", ".......00333311333222220", "........033111111322200.", ".........031111113220...", "..........0331133000....", "...........000000.......", "........................", "........................", "........................"],
-  TIDEWYRM: [".020....0...............", "..020..020..............", "..0220.020..............", "..02220220..............", "..00233320..............", ".0333333330.............", ".0333033330.............", ".0333033330.............", ".0111333330.........0...", "..00333330..00.....020..", "....003330.0220...0220..", ".....0333300220..02220..", ".....0333300220.02220...", ".....0333302222033220...", "......033333303311320...", "......0331133311333330..", ".......033311113333330..", "........003331333033330.", "..........0003330333330.", "........0....0000333330.", ".......010000000333330..", "......011133333333330...", ".....011003333333330....", "......00.03333333330...."],
-  SKYLEVIATH: ["........020...0.........", ".0......0220.020......0.", "010......0220220.....010", "0110....03333320....0110", ".0110...03333330...0110.", ".01310..03303330..01310.", ".013310.03303330.013310.", ".0113310033333300133110.", "..01333100031330133310..", "..01333310033331333310..", "..01133330033303333110..", "..01133330033303333110..", "...013330.03130033310...", "...01030..03130.03010...", "....0.0...033130.0.0....", "..........033130........", "...........033130.......", "...........0333330......", "............033330......", "............0333330.....", "......0000000333330.....", ".....02233333333330.....", "....02222333333300......", ".....00033333330........"],
-  ZAPPIP: ["........................", ".........0....00........", "........010..0210.......", "........020..020........", ".........020020.........", ".........0200200........", "........022202220.......", "........0200.020........", "........020..020........", "........02000020........", "........03233320........", ".......0333333330.......", "......033333333330......", ".....03330333330330.....", ".....03330333330330.....", ".....03332222223330.....", ".....03322200022330.....", "......032222222230......", ".......0322222230.......", ".......0033333300.......", "......022002200220......", "......022002200220......", ".......00..00..00.......", "........................"],
-  VOLTWICK: ["........................", ".........0....00........", "........020..0220.......", "........020..020........", ".........020020.........", ".........020020.........", ".........032320.........", "........03333330........", "......000330303000......", "....0011133030311100....", "...011111333333111110...", "..01111111333311111110..", "..01111111222211111110..", "...011111222222111110...", "....0011122222211100....", "......000222222000......", "........03333330........", ".......0333333330.......", ".......0331111330.......", ".......0331111330.......", ".......0331111330.......", "........03333330........", ".........000000.........", "........................"],
-  THUNDRAKE: ["........................", "........................", "...........00...........", ".........003300.........", "........03333330........", "..00000003033300000000..", ".0111111130333011111110.", "011111111333333111111110", "011111111112211111111110", ".0111111112222111111110.", "..00000000222200000000..", ".0111111112222111111110.", "011111111122221111111110", "011111111112331111111110", ".0111111110033111111110.", "..00000000.01300000000..", "..........00330.........", ".........033330.........", ".........033330.........", ".........031330.........", "..........033330........", "..........033330........", "..........03330.........", "..........0330.........."],
-  LILMYST: ["........................", "........................", ".......00......00.......", "......0110....0110......", "......0110....0110......", ".......020....020.......", ".......0220..0220.......", "........02000020........", "........02333320........", "......000323332000......", ".....03333333333330.....", "....0333333333333330....", "...033333333333333330...", "...033333333333333330...", "....0333330333033330....", ".....03333033303330.....", ".....03313333333130.....", ".....03333333333330.....", "......033333333330......", ".......0333333330.......", "........00000000........", "........................", "........................", "........................"],
-  VIOLOOM: ["........0......00.......", ".......020....0220......", ".......0220..0220.......", "....0000020..0200000....", "..00222202200220222200..", ".0222222222002222222220.", ".0222222220232222222220.", "022222222233332222222220", "022211112233332211112220", "022211112230302211112220", "022211112230302211112220", "022211112333333211112220", "022222222333333222222220", ".0222222233333322222220.", ".0222222233333322222220.", "..00333333333333333300..", "..03333333333333333330..", "..03333333333333333330..", "..03333333333333333330..", "..03333333333333333330..", "...033333300003333330...", "....000000....000000....", "........................", "........................"],
-  AMETHORA: ["0.......020110220......0", "20......02000020......02", "220......020020......022", "2220.00..020020..00.0222", "22220110.032320.01102222", "22221110.03030..01112222", "22222110.03030..01122222", "222221220033330022122222", "022222222033330222222220", "022222222233332222222220", "022222222233332222222220", "022222222233332222222220", "022222200033330002222220", "022000000333333000000220", ".0003333333333333333000.", ".0333333333333333333330.", "..03311333333333311330..", "..03311330033003311330..", "...033333003300333330...", "...033330..00..033330...", "....03330......03330....", "....0330........0330....", ".....00..........00.....", "........................"],
-  // outbound duck lines
-  CINDUCK: ["........................", "........................", "........................", ".............0..........", "............010.........", "..........0010..........", ".......0001110..........", "......0331110...........", ".....03333330...........", "....0333033330......0...", "..001133033330.....010..", ".011111133333000..0110..", "..01111333333333001110..", "...0000333333333311110..", ".....0333332222333110...", ".....0333322222233110...", ".....0333322222233010...", ".....033332222223300....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  BLAZEDRAKE: ["............010.........", "...........0110.........", ".........001100.........", "......0001111010........", ".....0331111110.........", "....0333311110........0.", "...0333033310........010", ".000333033330.......0110", "0111111333330......01110", "0111113333300000..011110", ".00000333333333300111110", "......033333333333111110", "......03333222222331110.", ".....033332222222233110.", ".....033322222222223110.", ".....03333222222223310..", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  PHOENIDRAKE: ["..........001100..0.....", ".........01110010010...0", ".....00001111110.010..01", "....0331111111000110.011", "...033333111111111100111", "...033303331111011101111", "000033303331110111111110", "111111133333100111111110", "111111133333001111111111", "000003333330000111111111", ".....0033333333331111110", "......033332222223311110", ".....0333322222222331110", ".....033332222222223110.", ".....033322222222223110.", ".....033322222222223110.", ".....03333222222223310..", ".....0333332222223330...", "......03333333333330....", ".......003333333300.....", ".........010000010......", ".........010...010......", ".........010...010......", "........01110.01110....."],
-  BREEZLET: ["........................", "........................", "........................", "........................", "........................", "...................0....", ".......0000.......020...", "......033330.....0220...", ".....03333330...02220...", "....0333033330.022220...", "..0011330333300222220...", ".0111111333330222220....", "..011113333333332220....", "...00003333333333220....", ".....033333222233320....", ".....03333222222330.....", ".....03333222222330.....", ".....03333222222330.....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  GALEDRAKE: ["........................", "........................", "..................0...0.", "......0000.......030.020", ".....033330.....03300220", "....03333330....03302220", "...0333033330..03332220.", ".000333033330..03332220.", "0111111333330.033322220.", "01111133333000333322220.", ".0000033333333333322220.", "......0333333333332220..", "......0333322222233220..", ".....03333222222223320..", ".....0333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  STORMWING: ["0.....................02", "20...................022", "220..000000.........0222", "022003333330.......02320", "0232333333330.....023320", "0233333033330....0233320", "0023333033330...02333220", "1111111333330..023333220", "1111111333330.023333320.", "00233333333000233333320.", "..023333333333333333320.", "..023333333222222333320.", "..023333332222222233220.", "...0233333222222222320..", "...0233332222222222320..", "....00333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......003333333300.....", ".........010000010......", ".........010...010......", ".........010...010......", "........01110.01110....."],
-  MUSELET: ["........................", "........................", "........................", "........................", "........................", ".........0..............", ".......0010.............", "......033110............", ".....03333330...........", "....0333033330..........", "..001133033330..........", ".011111133333000........", "..011113333333330.......", "...000033333333330......", ".....03333322223330.....", ".....03333222222330.....", ".....03333222222330.....", ".....03333222222330.....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  MYSTDRAKE: ["........................", "........................", ".......00...............", "......0110........00....", ".....031130......0110...", "....03311330....011110..", "...0333033330...011110..", ".000333033330....0110...", "0111111333330.....0000..", "0111113333300000...0110.", ".00000333333333300.0110.", "......0333333333330.00..", "......03333222222330....", ".....0333322222222330...", ".....0333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  ASTRALDRAKE: ["........................", "....0..00..00...........", "...02001100220.....00...", "...0233113300.....0110..", "...0333333330....011110.", "...0333033330....011110.", "0000333033330.....0110..", "1111111333330......00...", "1111111333330...........", "00000333333000000....00.", ".....00333333333300.0110", "......033332222223300110", ".....033332222222233000.", "..00.0333322222222230...", ".01100333222222222230...", ".01100333222222222230...", "..00.0333322222222330...", ".....0333332222223330...", "......033333333333310...", ".......00333333330110...", ".........01000001000....", ".........010...010......", ".........010...010......", "........01110.01110....."],
-  SHADLET: ["........................", "........................", "........................", "..........0.............", ".........020............", ".........0220...........", ".......002220...........", "......033330............", ".....03333330...........", "....0322122220..........", "..001122022220..........", ".011111133333000........", "..011113333333330.......", "...000033333333330......", ".....03333322223330.....", ".....03333222222330.....", ".....03333222222330.....", ".....03333222222330.....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  NIGHTDRAKE: ["..........0.............", ".........0200...........", "........022020..........", "......00222220..........", ".....03333220...........", "....033333220...........", "...0322122220...........", ".000322022220...........", "0111111333330...........", "0111113333300000........", ".00000333333333300......", "......0333333333330.....", "......03333222222330....", ".....0333322222222330...", ".....0333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  ECLIPSDRAKE: ["........02200020........", ".......02220220.........", ".....0022222220.........", "....03333222220.......0.", "...02222222220.......020", "...02221222220.....00220", "00002220222220...0022220", "1111111333330...0222220.", "1111111333330..02222220.", "00000333333000022222220.", ".....003333333333222220.", "......033332222223322200", ".....0333322222222332222", ".....0333322222222232220", ".....033322222222123220.", ".....033322222222213220.", ".....03333222222213320..", ".....0333332222223330...", "......03333333333330....", ".......003333333300.....", ".........010000010......", ".........010...010......", ".........010...010......", "........01110.01110....."],
-  ZAPLING: ["........................", "..........00............", ".........0110...........", ".........010............", "..........0.............", ".........010............", ".......0000.............", "......033330............", ".....03333330......00...", "....0333033330....0110..", "..001133033330....010...", ".011111133333000.0100...", "..01111333333333001110..", "...000033333333330110...", ".....033333222233310....", ".....03333222222330.....", ".....03333222222330.....", ".....03333222222330.....", "......033332222330......", ".......0333333330.......", "........01133110........", "........01100110........", ".........00..00.........", "........................"],
-  AMPDRAKE: ["........010.............", "........010.............", "........0110............", "......00010.............", ".....033130.............", "....03333330........00..", "...0333033330......0110.", ".000333033330......010..", "0111111333330.....0110..", "0111113333300000..0100..", ".0000033333333330001110.", "......0333333333330110..", "......033332222223310...", ".....0333322222222330...", ".....0333222222222230...", ".....0333322222222330...", ".....0333332222223330...", "......03333333333330....", ".......033333333330.....", "........0033333300......", ".........01000010.......", ".........010..010.......", "........0111001110......", ".........000..000......."],
-  TESLADRAKE: ["........010.........00..", ".......010.........0110.", ".....000110........0110.", "....03331330......0110..", "...0333333330.....01000.", "...0333033330.....011110", "0000333033330.....01110.", "1111111333330.....0110..", "1111111333330....0110...", "00000333333000000010....", ".....00333333333300..00.", "......033332222223300110", ".....033332222222233010.", ".....033332222222223000.", ".....0333222222222230110", ".....033322222222223010.", ".....03333222222223310..", ".....0333332222223330...", "......03333333333330....", ".......003333333300.....", ".........010000010......", ".........010...010......", ".........010...010......", "........01110.01110....."],
-};
 type CLine = { name: string; map: string[]; base: any; flavor: string }[];
-const mkLine = (names: string[], flavors: string[]): CLine => names.map((n, i) => ({ name: n, map: CREATURE_MAPS[n], base: SPECIES[i].base, flavor: flavors[i] }));
+// art ids follow the team sprite sheets: <Owner>_in_1..3 (inbound line), <Owner>_out_1..3 (outbound line)
+const mkLine = (names: string[], flavors: string[], art: string): CLine => names.map((n, i) => ({ name: n, map: ART(`${art}_${i + 1}`), base: SPECIES[i].base, flavor: flavors[i] }));
 const pal4 = (a: string[]) => ({ d0: a[0], d1: a[1], d2: a[2], d3: a[3] });
 const TRAINERS: Record<string, { cls: string; type: string; obType: string; color: string; line: CLine; obLine: CLine; inPal: any; obPal: any }> = {
   "89400804": { cls: "Team Red", type: "Fire", color: "#e8603c",
-    line: mkLine(["KINDLIT", "BLAZETAIL", "PYRALYNX"], ["Its tail flickers brighter every time a trial signs up.", "Turns a cold lead warm with a single follow-up.", "Leaves a trail of booked meetings wherever it hunts."]),
-    inPal: pal4(["#3a2020", "#ffb030", "#e8603c", "#ffe2c0"]), obType: "Fire", obLine: mkLine(["CINDUCK", "BLAZEDRAKE", "PHOENIDRAKE"], ["Waddles into cold accounts and warms them right up.", "Its first email lands like a spark in dry grass.", "Revives closed-lost accounts from the ashes."]),
+    line: mkLine(["KINDLIT", "BLAZETAIL", "PYRALYNX"], ["Its tail flickers brighter every time a trial signs up.", "Turns a cold lead warm with a single follow-up.", "Leaves a trail of booked meetings wherever it hunts."], "Rebecca_in"),
+    inPal: pal4(["#3a2020", "#ffb030", "#e8603c", "#ffe2c0"]), obType: "Fire", obLine: mkLine(["CINDUCK", "BLAZEDRAKE", "PHOENIDRAKE"], ["Waddles into cold accounts and warms them right up.", "Its first email lands like a spark in dry grass.", "Revives closed-lost accounts from the ashes."], "Rebecca_out"),
     obPal: pal4(["#3a2020", "#ffa424", "#d8503a", "#ffd6a0"]) },
   "95672339": { cls: "Team Silver", type: "Dark", color: "#7d8691",
-    line: mkLine(["HOOTLET", "DUSKOWL", "NOCTURNEX"], ["Sees every reply, even the ones sent at 2 a.m.", "Hunts silently through the inbox after dark.", "Team Silver's sharpest eyes. No lead escapes its gaze."]),
-    inPal: pal4(["#1e1f24", "#e6c34a", "#4a4e57", "#a8b0ba"]), obType: "Dark", obLine: mkLine(["SHADLET", "NIGHTDRAKE", "ECLIPSDRAKE"], ["Slips past gatekeepers unnoticed.", "Strikes from the shadows with a perfectly timed bump.", "Team Silver's outbound specialist. Its sequences never miss."]),
+    line: mkLine(["HOOTLET", "DUSKOWL", "NOCTURNEX"], ["Sees every reply, even the ones sent at 2 a.m.", "Hunts silently through the inbox after dark.", "Team Silver's sharpest eyes. No lead escapes its gaze."], "Lauren_in"),
+    inPal: pal4(["#1e1f24", "#e6c34a", "#4a4e57", "#a8b0ba"]), obType: "Dark", obLine: mkLine(["SHADLET", "NIGHTDRAKE", "ECLIPSDRAKE"], ["Slips past gatekeepers unnoticed.", "Strikes from the shadows with a perfectly timed bump.", "Team Silver's outbound specialist. Its sequences never miss."], "Lauren_out"),
     obPal: pal4(["#1a1b20", "#e6c34a", "#3c4048", "#9aa3ad"]) },
   "95288851": { cls: "Team Blue", type: "Water/Dragon", color: "#2f6fd6",
-    line: mkLine(["DRIZZLET", "TIDEWYRM", "SKYLEVIATH"], ["Splashes into new trials before anyone else notices.", "Its cadence rises and falls like the tide.", "Said to calm even the stormiest prospect."]),
-    inPal: pal4(["#14304f", "#f6efd6", "#2f6fd6", "#8fc4ff"]), obType: "Flying", obLine: mkLine(["BREEZLET", "GALEDRAKE", "STORMWING"], ["Scouts new accounts from high above.", "Rides the outbound winds from one territory to the next.", "Can multi-thread an entire org in a single flight."]),
+    line: mkLine(["DRIZZLET", "TIDEWYRM", "SKYLEVIATH"], ["Splashes into new trials before anyone else notices.", "Its cadence rises and falls like the tide.", "Said to calm even the stormiest prospect."], "Priscilla_in"),
+    inPal: pal4(["#14304f", "#f6efd6", "#2f6fd6", "#8fc4ff"]), obType: "Flying", obLine: mkLine(["BREEZLET", "GALEDRAKE", "STORMWING"], ["Scouts new accounts from high above.", "Rides the outbound winds from one territory to the next.", "Can multi-thread an entire org in a single flight."], "Priscilla_out"),
     obPal: pal4(["#14304f", "#ffc04a", "#4a86e8", "#e8f2ff"]) },
   "102299028": { cls: "Team Yellow", type: "Electric", color: "#e0b400",
-    line: mkLine(["ZAPPIP", "VOLTWICK", "THUNDRAKE"], ["Buzzes with first-quarter energy.", "Its glow lights up the darkest backlog.", "Strikes the same account twice: once by email, once by phone."]),
-    inPal: pal4(["#3a2e05", "#7ae7ff", "#f2a900", "#ffe14a"]), obType: "Electric", obLine: mkLine(["ZAPLING", "AMPDRAKE", "TESLADRAKE"], ["Fizzes with energy on every cold call.", "Its dials crackle with momentum.", "Powers through a full call block without slowing down."]),
+    line: mkLine(["ZAPPIP", "VOLTWICK", "THUNDRAKE"], ["Buzzes with first-quarter energy.", "Its glow lights up the darkest backlog.", "Strikes the same account twice: once by email, once by phone."], "Divya_in"),
+    inPal: pal4(["#3a2e05", "#7ae7ff", "#f2a900", "#ffe14a"]), obType: "Electric", obLine: mkLine(["ZAPLING", "AMPDRAKE", "TESLADRAKE"], ["Fizzes with energy on every cold call.", "Its dials crackle with momentum.", "Powers through a full call block without slowing down."], "Divya_out"),
     obPal: pal4(["#3a2e05", "#ff8a1f", "#f2a900", "#ffe14a"]) },
   "96069408": { cls: "Team Purple", type: "Psychic", color: "#8a55d0",
-    line: mkLine(["LILMYST", "VIOLOOM", "AMETHORA"], ["Senses a hand-raiser before the form is submitted.", "Its petals pick up hidden buying signals.", "Reads every account like a crystal ball."]),
-    inPal: pal4(["#2c1840", "#ffb8e6", "#7b4bc4", "#c8a6f2"]), obType: "Psychic", obLine: mkLine(["MUSELET", "MYSTDRAKE", "ASTRALDRAKE"], ["Somehow knows who will reply before they do.", "Its stare finds the champion in any org chart.", "Sees the whole buying committee at once."]),
+    line: mkLine(["LILMYST", "VIOLOOM", "AMETHORA"], ["Senses a hand-raiser before the form is submitted.", "Its petals pick up hidden buying signals.", "Reads every account like a crystal ball."], "Isabel_in"),
+    inPal: pal4(["#2c1840", "#ffb8e6", "#7b4bc4", "#c8a6f2"]), obType: "Psychic", obLine: mkLine(["MUSELET", "MYSTDRAKE", "ASTRALDRAKE"], ["Somehow knows who will reply before they do.", "Its stare finds the champion in any org chart.", "Sees the whole buying committee at once."], "Isabel_out"),
     obPal: pal4(["#2c1840", "#ff7ad0", "#7b4bc4", "#d8c2f6"]) },
 };
 const trainerOf = (bdr: string) => TRAINERS[bdr] ?? { cls: "BDR Trainer", type: "Normal", obType: "Normal", color: "#3878c8" };
@@ -1468,16 +1518,6 @@ const palOf = (bdr: string, ob: boolean, shiny: boolean) => {
   const t = TRAINERS[bdr];
   return t ? (ob ? t.obPal : t.inPal) : ob ? CREATURE_PALS.out : CREATURE_PALS.in;
 };
-// swap every creature to the team's sprite-sheet art (top row = inbound, bottom row = outbound)
-const ART_OWNER: Record<string, string> = { "89400804": "Rebecca", "95288851": "Priscilla", "95672339": "Lauren", "96069408": "Isabel", "102299028": "Divya" };
-Object.entries(ART_OWNER).forEach(([id, nm]) => {
-  const t = TRAINERS[id];
-  if (!t) return;
-  t.line.forEach((s, i) => { s.map = ART(`${nm}_in_${i + 1}`); });
-  t.obLine.forEach((s, i) => { s.map = ART(`${nm}_out_${i + 1}`); });
-});
-SPECIES.forEach((s: any, i: number) => { s.map = ART(`Default_in_${i + 1}`); });
-OB_SPECIES.forEach((s: any, i: number) => { s.map = ART(`Default_out_${i + 1}`); });
 
 function obGameSql(bdr: string, qs: string, qe: string) {
   return `WITH params AS (SELECT '${bdr}' AS bdr, DATE '${qs}' AS qs, DATE '${qe}' AS qe),
@@ -1589,8 +1629,8 @@ function TrainerTab({ defaultTrainer }: { defaultTrainer: string }) {
   return (
     <div style={{ fontFamily: UI.body }}>
       <div style={{ ...PANEL(), display: "flex", alignItems: "center", gap: 14, padding: "10px 16px", marginBottom: 12, borderLeft: `6px solid ${tr.color}` }}>
-        <Sprite map={lineFor(tid, false)[0].map} pal={palOf(tid, false, false)} scale={3} />
-        <Sprite map={lineFor(tid, true)[0].map} pal={palOf(tid, true, false)} scale={3} />
+        <Sprite map={lineFor(tid, false)[0].map} pal={palOf(tid, false, false)} h={44} />
+        <Sprite map={lineFor(tid, true)[0].map} pal={palOf(tid, true, false)} h={44} />
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: fs(11), color: C.muted, textTransform: "uppercase", letterSpacing: 1 }}>{tr.cls}</div>
           <div style={{ fontSize: fs(19), fontWeight: 700 }}>{bdrName(tid)}</div>
@@ -1674,8 +1714,8 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
           {loading ? <div style={{ height: 300 }} className="animate-pulse" /> : (<>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", ...(UI.game ? BATTLE_BG : {}) }}>
               <div style={{ width: "55%", ...(UI.game ? NAMEPLATE : {}) }}>
-                <div style={{ fontSize: UI.game ? fs(17) : 15, fontWeight: 700, fontFamily: UI.pixel }}>{sp.name}{shiny ? " ✦" : ""}</div>
-                <div style={{ fontSize: fs(12), margin: "2px 0 6px" }}>:L{lv}</div>
+                <div style={{ fontSize: UI.game ? undefined : 15, fontWeight: 700 }}>{UI.game ? <PixelText text={`${sp.name}${shiny ? " ✦" : ""}`} px={fs(17)} color="#303030" /> : `${sp.name}${shiny ? " ✦" : ""}`}</div>
+                <div style={{ margin: `${SP.xs}px 0 ${SP.sm}px` }}><LvBadge lv={lv} px={12} /></div>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: fs(10) }}>
                   <b style={UI.game ? { background: "#e8b830", padding: "0 5px", borderRadius: 3, border: "1px solid #484848" } : {}}>SQA</b><div style={{ flex: 1 }}><Bar pct={(sqas / quota) * 100} color={sqas / quota >= 0.66 ? (UI.game ? "#48c050" : GB.d1) : sqas / quota >= 0.33 ? (UI.game ? "#f0c030" : "#c8a000") : (UI.game ? "#f05030" : "#b03a2e")} bg={UI.game ? "#f2f2f2" : GB.d2} /></div>
                 </div>
@@ -1685,8 +1725,8 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
                 </div>
                 <div style={{ fontSize: fs(9.5), textAlign: "right", marginTop: 2 }}>{Math.round(lvNext - xp).toLocaleString()} TO :L{lv + 1}</div>
               </div>
-              <div style={UI.game ? STAGE(shiny) : { background: pal === SHINY ? "#fff4cf" : GB.d3, borderRadius: UI.radius2, padding: 4 }}>
-                <Sprite map={sp.map} pal={pal} scale={8} flip />
+              <div style={{ flex: 1, minWidth: 0, alignSelf: "stretch", display: "flex", alignItems: "flex-end" }}>
+                <SpriteFill map={sp.map} pal={pal} maxH={200} minH={96} pad={UI.game ? STAGE(shiny) : { background: pal === SHINY ? "#fff4cf" : GB.d3, borderRadius: UI.radius2, padding: 4 }} />
               </div>
             </div>
 
@@ -1694,7 +1734,7 @@ function CreaturePanel({ tid, qtr, ob, quota }: { tid: string; qtr: any; ob: boo
               {LINE.map((s, i) => (
                 <div key={s.name} style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <div style={{ opacity: i <= stage ? 1 : 0.35, textAlign: "center" }}>
-                    <Sprite map={s.map} pal={palOf(tid, ob, i === 2 && shiny)} scale={2.5} />
+                    <Sprite map={s.map} pal={palOf(tid, ob, i === 2 && shiny)} h={56} fit="line" />
                     <div style={{ fontSize: fs(8.5) }}>{i === 0 ? "0" : i === 1 ? t1 : t2} SQA</div>
                   </div>
                   {i < 2 && <span style={{ fontSize: fs(12) }}>▶</span>}
@@ -1915,11 +1955,11 @@ function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: 
   return (
     <div style={{ ...PANEL(), flex: "1 1 330px", minWidth: 0, display: "flex", alignItems: "center", gap: 10, padding: "6px 14px 6px 6px", position: "relative" }}>
       <div style={{ ...STAGE(shiny), padding: "2px 12px 16px", lineHeight: 0, position: "relative", animation: flash ? "bdrPop .5s steps(4) 3" : undefined }}>
-        {loaded ? <Sprite map={sp.map} pal={palOf(bdr, ob, shiny)} scale={4.4} flip />
-          : <div title="Loading your EXP…" style={{ filter: "brightness(0)", opacity: 0.18 }}><Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} scale={4.4} flip /></div>}
+        {loaded ? <Sprite map={sp.map} pal={palOf(bdr, ob, shiny)} h={96} />
+          : <div title="Loading your EXP…" style={{ filter: "brightness(0)", opacity: 0.18 }}><Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} h={96} /></div>}
         {floats.map((f) => (
           <span key={f.id} style={{ position: "absolute", left: "50%", top: 4, transform: "translateX(-50%)", fontSize: fs(13), fontWeight: 700, color: f.color, whiteSpace: "nowrap",
-            textShadow: "1px 1px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff", animation: "bdrFloat 1.6s ease-out forwards", pointerEvents: "none", lineHeight: 1 }}>+{f.amt} EXP</span>
+            animation: "bdrFloat 1.2s ease-out forwards", pointerEvents: "none", lineHeight: 0, filter: "drop-shadow(1px 1px 0 #fff) drop-shadow(-1px -1px 0 #fff)" }}><PixelText text={`+${f.amt} EXP`} px={fs(12)} color={f.color} /></span>
         ))}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1929,8 +1969,8 @@ function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: 
             : lvUpsToday > 0 ? <span style={{ fontSize: fs(9.5), fontWeight: 700, color: "#3a9a4a" }}>▲ {lvUpsToday} LV TODAY</span> : null}
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "1px 0 4px" }}>
-          <b style={{ fontSize: fs(15), color: loaded ? "#303030" : C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{loaded ? `${sp.name}${shiny ? " ✦" : ""}` : "???"}</b>
-          <span style={{ fontSize: fs(12), color: loaded ? "#303030" : C.faint }}>:L{loaded ? x.lv : "??"}</span>
+          <span style={{ overflow: "hidden", minWidth: 0 }}><PixelText text={loaded ? `${sp.name}${shiny ? " ✦" : ""}` : "???"} px={fs(15)} color={loaded ? "#303030" : C.faint} /></span>
+          <LvBadge lv={loaded ? x.lv : "??"} px={11} color={loaded ? "#303030" : C.faint} />
           <span style={{ fontSize: fs(9.5), color: C.faint, marginLeft: "auto", whiteSpace: "nowrap" }}>{loaded ? `${sqas}/${q} SQA` : "??/?? SQA"}</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -2023,7 +2063,7 @@ function LeagueMon({ s, ob, bdr, scale = 4.6, showToday = true }: { s: Summ | nu
     return (
       <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }}>
         <div style={{ ...STAGE(false), padding: "2px 14px 18px", lineHeight: 0, filter: "brightness(0)", opacity: 0.16 }}>
-          <Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} scale={scale} />
+          <Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} h={Math.round(scale * 20)} />
         </div>
         <div style={{ fontSize: fs(10.5), fontWeight: 700, color: C.faint }}>???</div>
         <div style={{ fontSize: fs(9.5), color: C.faint }}>:L?? · ??/?? SQA</div>
@@ -2035,7 +2075,7 @@ function LeagueMon({ s, ob, bdr, scale = 4.6, showToday = true }: { s: Summ | nu
     <div title={`${sp.name} Lv ${s.lv}${s.shiny ? " ✦ shiny" : ""}`} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0, width: "100%" }}>
       <div style={{ fontSize: fs(9), letterSpacing: 1, color: C.accent }}>{ob ? "◎ OUTBOUND" : "◓ INBOUND"}</div>
       <div style={{ ...STAGE(s.shiny), padding: "2px 14px 18px", lineHeight: 0, minHeight: box, display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
-        <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} scale={scale} />
+        <Sprite map={sp.map} pal={palOf(bdr, ob, s.shiny)} h={Math.round(scale * 20)} />
       </div>
       <div style={{ fontSize: fs(11), fontWeight: 700, color: "#303030", maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sp.name}{s.shiny ? " ✦" : ""}</div>
       <div style={{ fontSize: fs(9.5), color: C.muted }}>:L{s.lv} · {s.sqas}/{s.quota} SQA</div>
@@ -2592,7 +2632,7 @@ function DraftsTab() {
 
   return (
     <div style={{ fontFamily: UI.body }}>
-      <h1 style={{ fontSize: UI.game ? fs(20) : 21, fontWeight: 800, margin: UI.game ? "8px 0 4px" : "2px 0 0", fontFamily: UI.pixel }}>Drafting Center</h1>
+      <PageTitle text="Drafting Center" />
       <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
         Below are settings to adjust behavior, like auto CC-ing AE/CE or changing model's voice to a different BDR's style.
       </div>
@@ -3139,7 +3179,7 @@ function OutboundFeed() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
         <div>
           <div style={{ fontSize: fs(10), letterSpacing: 2, color: C.accent }}>BDR TERMINAL // OUTBOUND</div>
-          <h1 style={{ fontSize: UI.game ? fs(20) : 21, fontWeight: 800, margin: UI.game ? "8px 0 4px" : "2px 0 0", fontFamily: UI.pixel }}>Accounts</h1>
+          <PageTitle text="Accounts" />
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {loading ? "loading…" : `${scoped.length} accounts · ${scoped.reduce((n, a) => n + a.contacts.length, 0)} Apollo contacts · ${counts.hot ?? 0} hot · ${counts.followup ?? 0} need follow-up`}
             {" · queues + acting-as follow the Signal Feed selectors"}
@@ -3557,7 +3597,7 @@ function SignalFeed() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
         <div>
           <div style={{ fontSize: fs(10), letterSpacing: 2, color: C.accent }}>BDR TERMINAL // INBOUND</div>
-          <h1 style={{ fontSize: UI.game ? fs(20) : 21, fontWeight: 800, margin: UI.game ? "8px 0 4px" : "2px 0 0", fontFamily: UI.pixel }}>Signal Feed</h1>
+          <PageTitle text="Signal Feed" />
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {firstLoad ? "loading…" : `${scoped.length} contacts in scope · ${bucketCounts.active ?? 0} active · ${bucketCounts.retouch_due ?? 0} retouch due`}
             {ovQ.isError ? " · overlay unavailable (read-only)" : ""}
