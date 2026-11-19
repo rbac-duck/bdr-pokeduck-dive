@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSQLQuery, useDiveState, useRunFlight, useFlightRun } from "@motherduck/react-sql-query";
 import {
   ExternalLink, Linkedin, Search, AlertTriangle, Mail, TrendingUp, CalendarPlus, Coins, Rocket, Clock,
@@ -56,6 +56,28 @@ const fs = (n: number) => Math.round(n * UI.scale * 2) / 2;
 const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialiased; }
 .bdr-root button:active { transform: translateY(1px); }
 .bdr-root button:focus-visible, .bdr-root a:focus-visible, .bdr-root [tabindex]:focus-visible { outline: 2px solid #3878c8; outline-offset: 2px; }
+.bdr-page { padding: 24px; }
+.bdr-split { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 880px); gap: 16px; align-items: start; }
+.bdr-split > .bdr-list { max-height: min(78vh, 820px); }
+.bdr-split > .bdr-detail { position: sticky; top: 8px; }
+.bdr-row { transition: background .12s; outline-offset: -2px; }
+.bdr-row:hover { background: var(--bdr-hover); }
+.bdr-row .bdr-row-links { opacity: 0; transition: opacity .12s; }
+.bdr-row:hover .bdr-row-links, .bdr-row:focus-within .bdr-row-links, .bdr-row[data-on="1"] .bdr-row-links { opacity: 1; }
+.bdr-cmd { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; margin: 16px 0 4px; }
+.bdr-cmd-btns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+@media (max-width: 560px) { .bdr-cmd { grid-template-columns: minmax(0, 1fr); } }
+.bdr-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 12px 16px; }
+.bdr-root details > summary { list-style: none; cursor: pointer; }
+.bdr-root details > summary::-webkit-details-marker { display: none; }
+.bdr-root details[open] > summary .bdr-chev { transform: rotate(90deg); }
+@media (hover: none) { .bdr-row .bdr-row-links { opacity: 1; } }
+@media (max-width: 900px) {
+  .bdr-page { padding: 16px; }
+  .bdr-split { grid-template-columns: minmax(0, 1fr); }
+  .bdr-split > .bdr-list { max-height: 440px; }
+  .bdr-split > .bdr-detail { position: static; }
+}
 .bdr-root select, .bdr-root input, .bdr-root textarea { outline-color: #3878c8; }
 .bdr-root ::selection { background: #3878c8; color: #fff; }
 @keyframes bdrSpin{to{transform:rotate(360deg)}} @keyframes bdrBlink { 0%, 49% { opacity: 1 } 50%, 100% { opacity: 0 } }
@@ -92,6 +114,14 @@ const SIG: Record<string, { color: string; Icon: any }> = {
   "Content download": { color: "#c0eb75", Icon: BookOpen },
 };
 const sigMeta = (s: string) => SIG[s] ?? { color: C.muted, Icon: AlertTriangle };
+// darken a hex color (0..1) so pastel signal colors stay readable as text on white
+const shade = (hex: string, amt: number) => {
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return hex;
+  const c = [0, 2, 4].map((i) => Math.round(parseInt(h.slice(i, i + 2), 16) * (1 - amt)));
+  return "#" + c.map((v) => v.toString(16).padStart(2, "0")).join("");
+};
+const sigInk = (s: string) => (UI.game ? shade(sigMeta(s).color, 0.38) : sigMeta(s).color);
 const chipKey = (s: string) => (s.startsWith("Converted") ? "Converted" : s === "No-show" ? "Outcome unresolved"
   : s.startsWith("Event") ? "Event" : ["Reactivation engaged", "Usage reactivated", "Re-signup"].includes(s) ? "Reactivation" : s);
 const CHIPS: [string, string][] = [
@@ -848,13 +878,13 @@ function CommandMenu({ prompt, items }: { prompt: any; items: { label: string; c
   const cmd = (it: any): any => ({
     fontFamily: UI.body, fontSize: fs(14), fontWeight: 700, letterSpacing: 1, color: "#ffffff", textShadow: "1px 1px 0 rgba(0,0,0,.35)",
     background: it.disabled ? "linear-gradient(180deg, #c8c8c8 0%, #a8a8a8 100%)" : `linear-gradient(180deg, ${it.c1} 0%, ${it.c2} 100%)`,
-    border: "3px solid #383838", borderRadius: 999, padding: "8px 10px", cursor: it.disabled ? "not-allowed" : "pointer",
+    border: "3px solid #383838", borderRadius: 999, padding: "8px 10px", minHeight: 44, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", cursor: it.disabled ? "not-allowed" : "pointer",
     boxShadow: "inset 0 2px 0 rgba(255,255,255,.45)", textAlign: "center", textDecoration: "none", display: "block",
   });
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(0, 1fr)", gap: 10, margin: "14px 0 4px" }}>
+    <div className="bdr-cmd">
       <div style={{ ...DIALOG(), display: "flex", alignItems: "center" }}>{prompt}</div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      <div className="bdr-cmd-btns">
         {items.map((it) => it.href
           ? <a key={it.label} href={it.href} target="_blank" rel="noopener noreferrer" title={it.title} style={cmd(it)}>{it.label}</a>
           : <button key={it.label} disabled={it.disabled} title={it.title} onClick={it.onClick} style={cmd(it)}>{it.label}</button>)}
@@ -876,29 +906,33 @@ function Chip({ label, color, count, active, onClick }: any) {
   );
 }
 
-function SignalTag({ s, dim }: { s: Sig | string; dim?: boolean }) {
+// Signal type tag: the signal's color as a tint + icon, readable ink. big = the contact's top signal.
+function SignalTag({ s, dim, big }: { s: Sig | string; dim?: boolean; big?: boolean }) {
   const name = typeof s === "string" ? s : s.sig;
   const handled = typeof s !== "string" && s.handled;
   const m = sigMeta(name);
   const I = m.Icon;
+  const g = UI.game;
   return (
     <span title={handled ? "Touched since this signal" : "Unanswered"} style={{
-      display: "inline-flex", alignItems: "center", gap: 4, fontSize: fs(10.5), padding: UI.solid ? "2px 9px" : "1px 7px", borderRadius: UI.solid ? 999 : 3,
-      border: `1px solid ${UI.game ? "#9a9a9a" : m.color + "55"}`, color: UI.game ? C.text : m.color, background: UI.game ? "#ffffff" : `${m.color}14`,
-      fontWeight: UI.solid ? 700 : 400, whiteSpace: "nowrap",
-      opacity: handled || dim ? 0.45 : 1, textDecoration: handled ? "line-through" : "none",
+      display: "inline-flex", alignItems: "center", gap: big ? 6 : 4, fontSize: fs(g ? (big ? 13 : 11.5) : 10.5),
+      padding: g ? (big ? "4px 12px" : "2px 8px") : "1px 7px", borderRadius: g ? 999 : 3,
+      border: `1px solid ${g ? m.color + "aa" : m.color + "55"}`, color: g ? shade(m.color, 0.45) : m.color,
+      background: g ? `${m.color}${big ? "33" : "22"}` : `${m.color}14`,
+      fontWeight: g ? (big ? 800 : 600) : 400, whiteSpace: "nowrap", lineHeight: 1.4,
+      opacity: handled || dim ? 0.5 : 1, textDecoration: handled ? "line-through" : "none",
     }}>
-      <I size={11} color={m.color} /> {name}
+      <I size={big ? 14 : 12} color={g ? shade(m.color, 0.2) : m.color} /> {name}
     </span>
   );
 }
 
 function Stat({ label, value, tone, sub }: { label: string; value: string; tone?: string; sub?: string }) {
   return (
-    <div>
-      <div style={{ fontSize: fs(9.5), letterSpacing: 0.8, textTransform: "uppercase", color: C.faint }}>{label}</div>
-      <div style={{ fontSize: fs(13.5), fontWeight: 700, color: tone ?? C.text, fontVariantNumeric: "tabular-nums" }}>{value || "—"}</div>
-      {sub && <div style={{ fontSize: fs(10), color: C.faint }}>{sub}</div>}
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: fs(UI.game ? 11 : 9.5), letterSpacing: 0.6, textTransform: "uppercase", color: C.faint }}>{label}</div>
+      <div style={{ fontSize: fs(UI.game ? 15 : 13.5), fontWeight: 700, color: tone ?? C.text, fontVariantNumeric: "tabular-nums", marginTop: 2 }}>{value || "—"}</div>
+      {sub && <div style={{ fontSize: fs(UI.game ? 12 : 10), color: C.faint, marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
@@ -915,11 +949,33 @@ function Milestone({ done, label }: { done: boolean; label: string }) {
   );
 }
 
-function Section({ title, children }: any) {
+const SECTION_TITLE = (): any => (UI.game
+  ? { fontSize: fs(11.5), letterSpacing: 0.8, color: C.muted, fontWeight: 700, textTransform: "uppercase" }
+  : { fontSize: fs(10), letterSpacing: 1, color: C.accent });
+function Section({ title, children, right }: any) {
   return (
-    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 10 }}>
-      <div style={UI.game ? { fontSize: fs(11), letterSpacing: 1, color: C.muted, marginBottom: 10, fontWeight: 700, textTransform: "uppercase" } : { fontSize: fs(10), letterSpacing: 1, color: C.accent, marginBottom: 8 }}>{UI.game ? "" : "// "}{title}</div>
+    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: UI.game ? SP.xl : 12, paddingTop: UI.game ? SP.lg : 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: SP.sm, marginBottom: UI.game ? SP.md : 8 }}>
+        <div style={SECTION_TITLE()}>{UI.game ? "" : "// "}{title}</div>{right}
+      </div>
       {children}
+    </div>
+  );
+}
+// Collapsible "More details" section. Remembers open/closed per section while you move between contacts.
+const expanderMemory: Record<string, boolean> = {};
+function Expander({ id, title, summary, defaultOpen = false, children }: { id: string; title: string; summary?: any; defaultOpen?: boolean; children: any }) {
+  const [open, setOpen] = useState<boolean>(expanderMemory[id] ?? defaultOpen);
+  const toggle = () => { expanderMemory[id] = !open; setOpen(!open); };
+  return (
+    <div style={{ borderTop: `1px solid ${C.border}`, marginTop: UI.game ? SP.xl : 12 }}>
+      <button type="button" aria-expanded={open} onClick={toggle} style={{ display: "flex", alignItems: "center", gap: SP.sm, width: "100%", minHeight: TAP + 8,
+        padding: `${SP.sm}px 0`, background: "transparent", border: "none", cursor: "pointer", color: C.text, fontFamily: "inherit", textAlign: "left" }}>
+        <ChevronDown size={14} color={C.muted} style={{ transform: open ? "none" : "rotate(-90deg)", transition: "transform .15s", flexShrink: 0 }} />
+        <span style={SECTION_TITLE()}>{UI.game ? "" : "// "}{title}</span>
+        {!open && summary ? <span style={{ fontSize: fs(12), color: C.faint, marginLeft: "auto", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{summary}</span> : null}
+      </button>
+      {open && <div style={{ paddingBottom: SP.sm }}>{children}</div>}
     </div>
   );
 }
@@ -1006,35 +1062,52 @@ function Card({ r, acting, busy, onAct, runMsg, pendingKeys, stuck, onRetry }: {
   const overTop = r.last_by_id && r.last_by_id !== r.queue_owner_id;
   const dis = !canEdit || busy;
 
+  const sigsSorted = [...r.signals].sort((x, y) => Number(!!x.handled) - Number(!!y.handled) || x.rnk - y.rnk);
+  const top = sigsSorted[0];
+  const bucketLabel = BUCKETS.find((b) => b.id === r.bucket)?.label;
+  const engagedSinceTouch = !!(r.last_opened && (!r.last_touch || r.last_opened > r.last_touch));
+  const engageSummary = [r.last_opened ? `opened ${fmtAgo(r.last_opened)}` : "no opens", `${r.page_views} page views`, r.pricing_visits ? `${r.pricing_visits} pricing` : ""].filter(Boolean).join(" · ");
+  const usageSummary = [r.plan ? r.plan.replace("_", " ") : "no plan", r.org_name ? `${r.cpu_7d.toFixed(1)} CPU-h 7d` : "no org linked", r.awr > 0 ? `AWR ${fmtUsd(r.awr)}` : ""].filter(Boolean).join(" · ");
+  const pad = UI.game ? SP.xl : 14;
+  const tx = (n: number, t: number) => fs(UI.game ? n : t); // game theme reads a size up; Terminal keeps its compact sizes
+
   return (
-    <div style={{ ...PANEL(), padding: 14 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: fs(16.5), fontWeight: 700 }}>{r.contact_name || r.email || "Unknown contact"}</div>
-          <div style={{ fontSize: fs(12), color: C.muted, marginTop: 2 }}>{[r.jobtitle, r.company].filter(Boolean).join(" @ ") || "—"}</div>
-          <div style={{ fontSize: fs(11), color: C.faint, marginTop: 2 }}>
-            {r.email} · BDR owner: <b style={{ color: C.text }}>{bdrName(r.queue_owner_id)}</b>
+    <div style={{ ...PANEL(), padding: pad }}>
+      {/* identity: name > top signal > status > metadata */}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: SP.lg, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0, flex: "1 1 260px" }}>
+          <div style={{ fontSize: tx(21, 16.5), fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{r.contact_name || r.email || "Unknown contact"}</div>
+          <div style={{ fontSize: tx(14, 12), color: C.muted, marginTop: SP.xs }}>{[r.jobtitle, r.company].filter(Boolean).join(" @ ") || "—"}</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, marginTop: SP.md, alignItems: "center" }}>
+            {sigsSorted.map((s) => <SignalTag key={s.sig} s={s} big={s === top} />)}
+            {r.post_sqa && <span style={{ fontSize: tx(12, 10.5), color: C.faint, border: `1px dashed ${C.border}`, padding: "2px 8px", borderRadius: 999 }}>Post-SQA: {r.sqa_info || "qualified deal"}</span>}
+          </div>
+          <div style={{ fontSize: tx(13, 11), color: C.text, marginTop: SP.md, display: "flex", flexWrap: "wrap", gap: `${SP.xs}px ${SP.md}px`, alignItems: "center" }}>
+            {bucketLabel && <span style={{ fontWeight: 700, color: r.bucket === "active" || r.bucket === "retouch_due" ? C.danger : C.muted }}>{bucketLabel}</span>}
+            <span>Last touch <b style={{ color: dsl == null || dsl > 7 ? C.danger : C.text }}>{fmtAgo(r.last_touch)}</b>{r.last_by ? ` by ${r.last_by}` : ""}</span>
+            {r.last_reply && (!r.last_touch || r.last_reply > r.last_touch) && <span style={{ color: "#2f7fd6", fontWeight: 700 }}>Replied {fmtAgo(r.last_reply)}, awaiting us</span>}
+            {r.ov?.retouch_on && <span style={{ color: C.warn }}>↻ retouch {r.ov.retouch_on}</span>}
+          </div>
+          <div style={{ fontSize: tx(12, 11), color: C.faint, marginTop: SP.xs, overflowWrap: "anywhere" }}>
+            {r.email} · BDR owner <b style={{ color: C.muted }}>{bdrName(r.queue_owner_id)}</b>
             {r.owner_id && r.owner_id !== r.queue_owner_id ? ` · contact owner ${r.contact_owner || bdrName(r.owner_id)}` : ""}
             {r.ae_name ? ` · AE ${r.ae_name}` : ""}
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 5, alignItems: "flex-end", flexShrink: 0 }}>
-          <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}>HubSpot <ExternalLink size={11} /></a>
+        <div style={{ display: "flex", flexDirection: "column", gap: SP.sm, alignItems: "stretch", flexShrink: 0 }}>
+          <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}>HubSpot <ExternalLink size={12} /></a>
           {r.linkedin_url
-            ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" style={{ ...btn("#5fb3ff"), textDecoration: "none" }}><Linkedin size={11} /> LinkedIn</a>
-            : <span style={{ fontSize: fs(10.5), color: C.faint }}>No LinkedIn on file</span>}
-          {r.primary_org_id && <a href={C360(r.primary_org_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn(C.accent), textDecoration: "none" }}>Customer 360 <ExternalLink size={11} /></a>}
+            ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" style={{ ...btn("#5fb3ff"), textDecoration: "none" }}><Linkedin size={12} /> LinkedIn</a>
+            : <span style={{ fontSize: tx(12, 10.5), color: C.faint, textAlign: "center" }}>No LinkedIn on file</span>}
+          {r.primary_org_id && <a href={C360(r.primary_org_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn(C.accent), textDecoration: "none" }}>Customer 360 <ExternalLink size={12} /></a>}
         </div>
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-        {r.signals.map((s) => <SignalTag key={s.sig} s={s} />)}
-        {r.post_sqa && <span style={{ fontSize: fs(10.5), color: C.faint, border: `1px dashed ${C.border}`, padding: "1px 7px", borderRadius: 3 }}>Post-SQA: {r.sqa_info || "qualified deal"}</span>}
-      </div>
-      <div style={{ fontSize: fs(11), color: C.muted, marginTop: 6, lineHeight: 1.5 }}>
-        {r.signals.map((s) => (
-          <div key={s.sig}>
-            <span style={{ color: sigMeta(s.sig).color }}>{s.sig}</span>
+      {/* why they're in the queue */}
+      <div style={{ fontSize: tx(13, 11), color: C.muted, marginTop: SP.md, lineHeight: 1.6 }}>
+        {sigsSorted.map((s) => (
+          <div key={s.sig} style={{ opacity: s.handled ? 0.6 : 1 }}>
+            <span style={{ color: sigInk(s.sig), fontWeight: 600 }}>{s.sig}</span>
             {s.ts ? ` · ${fmtAgo(s.ts)}` : ""}{s.detail ? ` · ${s.detail}` : ""}{s.handled ? " · ✓ touched since" : ""}
           </div>
         ))}
@@ -1046,37 +1119,32 @@ function Card({ r, acting, busy, onAct, runMsg, pendingKeys, stuck, onRetry }: {
         { label: "REVIEWED", c1: "#70c878", c2: "#3e9a4a", disabled: dis, title: "Mark reviewed (r)", onClick: () => onAct("reviewed") },
         { label: "HUBSPOT", c1: "#6aa4f0", c2: "#3a74c8", href: HS_CONTACT(r.contact_id), title: "Open in HubSpot (h)" },
       ]} />
-      <Section title="TOUCH TIMELINE">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
+
+      <Section title="Touch timeline">
+        <div className="bdr-stats">
           <Stat label="Created" value={fmtDate(r.created)} sub={fmtAgo(r.created)} />
           <Stat label="Speed to lead" value={stl == null ? (r.first_touch ? "pre-existing" : "not yet") : `${stl}h`} tone={stlTone}
             sub={r.first_touch ? `first touch ${fmtDate(r.first_touch)}` : "no touch logged"} />
           <Stat label="Last touch" value={fmtAgo(r.last_touch)} tone={dsl == null || dsl > 7 ? C.danger : undefined}
             sub={r.last_by ? `${r.last_by} · ${r.last_channel}` : undefined} />
-          <Stat label="Last reply" value={fmtAgo(r.last_reply)} tone={r.last_reply && (!r.last_touch || r.last_reply > r.last_touch) ? "#5fb3ff" : undefined}
+          <Stat label="Last reply" value={fmtAgo(r.last_reply)} tone={r.last_reply && (!r.last_touch || r.last_reply > r.last_touch) ? "#2f7fd6" : undefined}
             sub={r.last_reply && (!r.last_touch || r.last_reply > r.last_touch) ? "awaiting our response" : undefined} />
         </div>
-        <div style={{ fontSize: fs(10.5), color: C.muted, marginTop: 6 }}>
-          Email last opened <b style={{ color: r.last_opened && (!r.last_touch || r.last_opened > r.last_touch) ? C.accent : C.text }}>{fmtAgo(r.last_opened)}</b>
-          {r.last_clicked ? ` · last clicked ${fmtAgo(r.last_clicked)}` : ""}
-          {" · "}web: {r.page_views} page views{r.pricing_visits ? ` · ${r.pricing_visits} pricing visits` : ""}{r.last_page ? ` · last page ${r.last_page}` : ""}
-          {r.page_cats.length ? ` · ${r.page_cats.join(", ")}` : ""}
-        </div>
         {overTop && (
-          <div style={{ fontSize: fs(10.5), color: C.warn, marginTop: 6 }}>
-            Last touch came from {r.last_by || "someone else"} (not the queue owner) — check before reaching out.
+          <div style={{ fontSize: tx(12.5, 10.5), color: C.warn, marginTop: SP.md }}>
+            Last touch came from {r.last_by || "someone else"} (not the queue owner). Check before reaching out.
           </div>
         )}
-        <div style={{ marginTop: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: fs(10.5), color: C.faint }}>
+        <div style={{ marginTop: SP.lg }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: SP.sm, fontSize: tx(12, 10.5), color: C.faint, flexWrap: "wrap" }}>
             <span>Cadence (14d): {r.touches_14d} HubSpot + {r.ov?.linkedin_14d ?? 0} LinkedIn · {r.calls_total} calls ({r.calls_connected} connected) all-time</span>
-            <span>target ~{CADENCE_TARGET_14D}</span>
+            <span>{touches}/{CADENCE_TARGET_14D} touches</span>
           </div>
           {UI.game ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
-              <span style={{ background: "#e8b830", color: "#303030", fontSize: fs(10), fontWeight: 700, padding: "0 5px", borderRadius: 3, border: "1px solid #484848" }}>HP</span>
-              <div style={{ flex: 1, height: 8, background: "#f2f2f2", border: "2px solid #484848", borderRadius: 4, overflow: "hidden" }}>
-                <div style={{ width: `${cadPct}%`, height: "100%", background: cadPct >= 100 ? "#48c050" : cadPct >= 50 ? "#f0c030" : "#f05030" }} />
+            <div style={{ display: "flex", alignItems: "center", gap: SP.sm, marginTop: 6 }}>
+              <PixelText text="HP" px={14} color="#303030" />
+              <div style={{ flex: 1, height: 10, background: "#eef0f3", border: "2px solid #484848", borderRadius: 5, overflow: "hidden" }}>
+                <div style={{ width: `${cadPct}%`, height: "100%", background: cadPct >= 100 ? "#48c050" : cadPct >= 50 ? "#f0c030" : "#f05030", transition: "width .4s ease" }} />
               </div>
             </div>
           ) : (
@@ -1086,58 +1154,66 @@ function Card({ r, acting, busy, onAct, runMsg, pendingKeys, stuck, onRetry }: {
         </div>
       </Section>
 
-      <Section title="TRIAL & USAGE">
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10 }}>
-          <Stat label="Plan" value={r.plan ? r.plan.replace("_", " ") : ""} sub={r.lifecycle || undefined} />
-          <Stat label="Trial ends" value={r.trial_end_date} />
-          <Stat label="CPU-h 7d" value={r.org_name ? r.cpu_7d.toFixed(1) : ""} tone={ratio != null && ratio >= 3 ? "#ffa94d" : undefined}
-            sub={ratio != null ? `${ratio.toFixed(1)}x vs prior wk` : r.cpu_7d > 0 ? "new this week" : undefined} />
-          <Stat label="AWR" value={r.awr > 0 ? fmtUsd(r.awr) : ""} tone={r.awr >= 6000 ? "#38d9a9" : undefined} />
-        </div>
-        <div style={{ fontSize: fs(10.5), color: C.faint, marginTop: 4 }}>
-          {r.org_name ? `Org: ${r.org_name}${r.org_count > 1 ? ` (+${r.org_count - 1} more)` : ""}` : "No MotherDuck org linked"} · lead status: {r.lead_status || "—"}
-        </div>
-        <div style={{ display: "flex", gap: 16, marginTop: 8 }}>
-          <Milestone done={r.m_add_data} label="Added data" />
-          <Milestone done={r.m_connect_tools} label="Connected tools" />
-          <Milestone done={r.m_share_data} label="Shared data" />
-        </div>
-      </Section>
-
-      <Section title="ACTIONS">
+      <Section title="Actions">
         {!canEdit && (
-          <div style={{ fontSize: fs(11), color: C.faint, marginBottom: 8, display: "flex", alignItems: "center", gap: 6 }}>
-            <Lock size={12} /> Read-only: only {bdrName(r.queue_owner_id)} can change this contact. Switch "Acting as" if that's you.
+          <div style={{ fontSize: tx(12.5, 11), color: C.faint, marginBottom: SP.md, display: "flex", alignItems: "center", gap: 6 }}>
+            <Lock size={13} /> Read-only: only {bdrName(r.queue_owner_id)} can change this contact. Switch "Acting as" if that's you.
           </div>
         )}
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          <button disabled={dis} style={btn(C.ok, dis)} onClick={() => onAct("reviewed")}><Check size={12} /> Reviewed</button>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm }}>
+          <button disabled={dis} style={btn(C.ok, dis)} onClick={() => onAct("reviewed")}><Check size={13} /> Reviewed</button>
           {[3, 7, 14].map((d) => (
-            <button key={d} disabled={dis} style={btn(C.warn, dis)} onClick={() => onAct("retouch_set", { days: d })}><RotateCcw size={12} /> Retouch {d}d</button>
+            <button key={d} disabled={dis} style={btn(C.warn, dis)} onClick={() => onAct("retouch_set", { days: d })}><RotateCcw size={13} /> Retouch {d}d</button>
           ))}
-          <span style={{ display: "inline-flex", gap: 4 }}>
-            <input value={days} onChange={(e) => setDays(e.target.value.replace(/\D/g, "").slice(0, 3))} style={{ ...ctl, width: 42 }} disabled={dis} />
+          <span style={{ display: "inline-flex", gap: SP.xs }}>
+            <input value={days} aria-label="Retouch in how many days" onChange={(e) => setDays(e.target.value.replace(/\D/g, "").slice(0, 3))} style={{ ...ctl, width: 52 }} disabled={dis} />
             <button disabled={dis || !days} style={btn(C.warn, dis || !days)} onClick={() => onAct("retouch_set", { days: Number(days) })}>days</button>
           </span>
           {r.ov?.retouch_on && <button disabled={dis} style={btn(C.muted, dis)} onClick={() => onAct("retouch_clear")}>Clear retouch ({r.ov.retouch_on})</button>}
         </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, marginTop: SP.md }}>
           <LiButtons li={liInfo(r.ov, r.hs_li)} cid={r.contact_id} dis={dis} pendingKeys={pendingKeys} onAct={(t) => onAct(t)} />
-          <div style={{ flexBasis: "100%", marginTop: 2 }}><LiTimeline li={liInfo(r.ov, r.hs_li)} /></div>
+          <div style={{ flexBasis: "100%", marginTop: SP.xs }}><LiTimeline li={liInfo(r.ov, r.hs_li)} /></div>
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
-          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Quick note (stays in the terminal)" disabled={dis}
-            style={{ ...ctl, flex: 1 }} />
+        <div style={{ display: "flex", gap: SP.sm, marginTop: SP.md }}>
+          <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Quick note (stays in the terminal)" disabled={dis} aria-label="Quick note"
+            style={{ ...ctl, flex: 1, minWidth: 0 }} />
           <button disabled={dis || !note.trim()} style={btn(C.accent, dis || !note.trim())} onClick={() => { onAct("note", { note }); setNote(""); }}>
-            <StickyNote size={12} /> Save
+            <StickyNote size={13} /> Save
           </button>
         </div>
-        {r.ov?.last_note && <div style={{ fontSize: fs(10.5), color: C.muted, marginTop: 6 }}>Last note ({fmtAgo(r.ov.last_note_ts)}): {r.ov.last_note}</div>}
+        {r.ov?.last_note && <div style={{ fontSize: tx(12, 10.5), color: C.muted, marginTop: SP.sm }}>Last note ({fmtAgo(r.ov.last_note_ts)}): {r.ov.last_note}</div>}
         <SaveStatus msg={runMsg} stuck={stuck} onRetry={onRetry} block />
       </Section>
 
+      <Expander id="engagement" title="Engagement" summary={engageSummary} defaultOpen={engagedSinceTouch}>
+        <div style={{ fontSize: tx(13, 10.5), color: C.muted, lineHeight: 1.7 }}>
+          <div>Email last opened <b style={{ color: engagedSinceTouch ? C.accent : C.text }}>{fmtAgo(r.last_opened)}</b>{r.last_clicked ? ` · last clicked ${fmtAgo(r.last_clicked)}` : ""}</div>
+          <div>Web: {r.page_views} page views{r.pricing_visits ? ` · ${r.pricing_visits} pricing visits` : ""}{r.last_page ? ` · last page ${r.last_page}` : ""}</div>
+          {r.page_cats.length > 0 && <div>Sections: {r.page_cats.join(", ")}</div>}
+        </div>
+      </Expander>
+
+      <Expander id="usage" title="Trial & usage" summary={usageSummary}>
+        <div className="bdr-stats">
+          <Stat label="Plan" value={r.plan ? r.plan.replace("_", " ") : ""} sub={r.lifecycle || undefined} />
+          <Stat label="Trial ends" value={r.trial_end_date} />
+          <Stat label="CPU-h 7d" value={r.org_name ? r.cpu_7d.toFixed(1) : ""} tone={ratio != null && ratio >= 3 ? "#d9822b" : undefined}
+            sub={ratio != null ? `${ratio.toFixed(1)}x vs prior wk` : r.cpu_7d > 0 ? "new this week" : undefined} />
+          <Stat label="AWR" value={r.awr > 0 ? fmtUsd(r.awr) : ""} tone={r.awr >= 6000 ? "#139a7a" : undefined} />
+        </div>
+        <div style={{ fontSize: tx(12, 10.5), color: C.faint, marginTop: SP.sm }}>
+          {r.org_name ? `Org: ${r.org_name}${r.org_count > 1 ? ` (+${r.org_count - 1} more)` : ""}` : "No MotherDuck org linked"} · lead status: {r.lead_status || "—"}
+        </div>
+        <div style={{ display: "flex", gap: SP.lg, marginTop: SP.md, flexWrap: "wrap" }}>
+          <Milestone done={r.m_add_data} label="Added data" />
+          <Milestone done={r.m_connect_tools} label="Connected tools" />
+          <Milestone done={r.m_share_data} label="Shared data" />
+        </div>
+      </Expander>
+
       <div id={`draft-${r.contact_id}`}>
-        <Section title="DRAFT NEXT TOUCH">
+        <Section title="Draft next touch">
           <DraftBox r={r} acting={acting} />
         </Section>
       </div>
@@ -3347,6 +3423,53 @@ function OutboundFeed() {
   );
 }
 
+// One contact in the Signal Feed list. Memoized: only re-renders when its own data or selection changes.
+const stopClick = (e: any) => e.stopPropagation();
+const FeedRow = memo(function FeedRow({ r, on, drafted, multiOwner, ov, onSelect, onToggleDraft }:
+  { r: Row; on: boolean; drafted: boolean; multiOwner: boolean; ov?: Ov; onSelect: (id: string) => void; onToggleDraft: (id: string) => void }) {
+  const lead = r.unhandled[0] ?? r.signals[0];
+  const more = r.signals.length - 1;
+  const d = daysSince(r.last_touch);
+  const g = UI.game;
+  const name = r.contact_name || r.email;
+  return (
+    <div className="bdr-row" data-on={on ? "1" : "0"} role="button" tabIndex={0} aria-pressed={on} aria-label={`${name}${lead ? `, ${lead.sig}` : ""}`}
+      onClick={() => onSelect(r.contact_id)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSelect(r.contact_id); } }}
+      style={{ display: "flex", gap: g ? 10 : 8, alignItems: "flex-start", padding: g ? "12px 12px 12px 10px" : "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
+        borderLeft: `4px solid ${on ? (g ? C.accent : sigMeta(lead?.sig ?? "").color) : "transparent"}`, background: on ? (g ? C.accentDim : C.surfaceAlt) : undefined }}>
+      <input type="checkbox" checked={drafted} onClick={stopClick} onChange={() => onToggleDraft(r.contact_id)} aria-label={`Select ${name} for AI draft`}
+        style={{ width: 16, height: 16, margin: g ? "3px 0 0" : "2px 0 0", cursor: "pointer", flexShrink: 0 }} />
+      {multiOwner && (
+        <span title={`${bdrName(r.queue_owner_id)}'s queue`} style={{ width: 28, height: 28, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Sprite map={lineFor(r.queue_owner_id, false)[0].map} pal={palOf(r.queue_owner_id, false, false)} h={28} />
+        </span>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: SP.sm }}>
+          <span style={{ fontSize: fs(g ? 15 : 12.5), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{g && on ? "▶ " : ""}{name}</span>
+          <span style={{ fontSize: fs(g ? 12 : 10), fontWeight: g ? 600 : 400, color: d == null || d > 7 ? C.danger : C.faint, flexShrink: 0, whiteSpace: "nowrap" }}>{d == null ? "untouched" : `${d}d ago`}</span>
+        </div>
+        <div style={{ display: "flex", gap: SP.xs + 2, alignItems: "center", flexWrap: "wrap", marginTop: g ? 6 : 3 }}>
+          {lead && <SignalTag s={lead} />}
+          {more > 0 && <span style={{ fontSize: fs(g ? 11.5 : 10), color: C.faint }}>+{more}</span>}
+          <LiBadge li={liInfo(ov ?? r.ov, r.hs_li)} />
+        </div>
+        <div style={{ fontSize: fs(g ? 12.5 : 10.5), color: C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: g ? 6 : 3 }}>
+          {r.company || "—"} · created {fmtAgo(r.created)}
+          {r.last_by && r.last_by_id !== r.queue_owner_id ? ` · last: ${r.last_by}` : ""}
+          {r.ov?.retouch_on ? ` · ↻ ${r.ov.retouch_on}` : ""}
+        </div>
+      </div>
+      <div className="bdr-row-links" style={{ display: "flex", flexDirection: "column", gap: SP.xs, flexShrink: 0 }}>
+        <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" onClick={stopClick} title="Open in HubSpot (h)" aria-label="Open in HubSpot" style={miniLink("#ff7a59")}>HS</a>
+        {r.linkedin_url
+          ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={stopClick} title="Open LinkedIn (l)" aria-label="Open LinkedIn" style={miniLink("#5fb3ff")}><Linkedin size={13} /></a>
+          : <span title="No LinkedIn on file" style={{ ...miniLink(C.faint), opacity: 0.35, cursor: "default" }}><Linkedin size={13} /></span>}
+      </div>
+    </div>
+  );
+});
+
 function SignalFeed() {
   const [acting, setActing] = useDiveState<string>("acting", "89400804");
   const [owners, setOwners] = useDiveState<string[]>("owners", ["89400804"]);
@@ -3452,13 +3575,13 @@ function SignalFeed() {
     }
   };
 
-  const scoped = derived.filter((r) => showPost || !r.post_sqa);
+  const scoped = useMemo(() => derived.filter((r) => showPost || !r.post_sqa), [derived, showPost]);
   const bucketCounts = useMemo(() => {
     const m: Record<string, number> = { all: scoped.length };
     for (const r of scoped) m[r.bucket] = (m[r.bucket] ?? 0) + 1;
     return m;
   }, [scoped]);
-  const inBucket = scoped.filter((r) => bucket === "all" || r.bucket === bucket);
+  const inBucket = useMemo(() => scoped.filter((r) => bucket === "all" || r.bucket === bucket), [scoped, bucket]);
   const sigCounts = useMemo(() => {
     const m: Record<string, number> = {};
     for (const r of inBucket) for (const k of new Set(r.signals.map((s) => chipKey(s.sig)))) m[k] = (m[k] ?? 0) + 1;
@@ -3468,7 +3591,7 @@ function SignalFeed() {
   const plans = useMemo(() => Array.from(new Set(scoped.map((r) => r.plan).filter(Boolean))).sort(), [scoped]);
 
   const needle = search.trim().toLowerCase();
-  const filtered = inBucket.filter((r) => {
+  const filtered = useMemo(() => inBucket.filter((r) => {
     if (sigSel.length && !r.signals.some((s) => sigSel.includes(chipKey(s.sig)))) return false;
     if (stage !== "any" && r.lifecycle !== stage) return false;
     if (plan !== "any" && r.plan !== plan) return false;
@@ -3506,7 +3629,7 @@ function SignalFeed() {
     }
     if (!needle) return true;
     return [r.contact_name, r.email, r.company, r.ae_name, r.last_by, r.org_name].some((v) => (v || "").toLowerCase().includes(needle));
-  });
+  }), [inBucket, sigSel.join(","), stage, plan, hasLi, opened, pages.join(","), liF, ctOwner, touchedBy, fresh, createdWin, needle, acting]);
 
   const sortVal = (r: Row): number | string => {
     switch (sortBy) {
@@ -3524,11 +3647,11 @@ function SignalFeed() {
       default: return r.prio;
     }
   };
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = useMemo(() => [...filtered].sort((a, b) => {
     const av = sortVal(a), bv = sortVal(b);
     const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
     return sortDir === "asc" ? cmp : -cmp;
-  });
+  }), [filtered, sortBy, sortDir]);
   const current = sorted.find((r) => r.contact_id === selected) ?? sorted[0];
   useEffect(() => { setShown(50); }, [bucket, sortBy, sortDir, search, sigSel.join(","), opened, pages.join(","), createdWin, hasLi, ownersSql]);
   useEffect(() => { const i = sorted.findIndex((x) => x.contact_id === current?.contact_id); if (i >= shown) setShown(i + 25); }, [current?.contact_id]);
@@ -3551,6 +3674,10 @@ function SignalFeed() {
     return () => window.removeEventListener("keydown", onKey);
   });
   const multiOwner = scopeIds.length > 1;
+  const rowApi = useRef({ setSelected, toggleDraft, sorted });
+  rowApi.current = { setSelected, toggleDraft, sorted };
+  const onSelectRow = useCallback((id: string) => rowApi.current.setSelected(id), []);
+  const onToggleDraftRow = useCallback((id: string) => { const r = rowApi.current.sorted.find((x) => x.contact_id === id); if (r) rowApi.current.toggleDraft(r); }, []);
   // Contact Owner (HubSpot) can be any BDR, AE or GTM person; list the ones in scope, most contacts first
   const ctOwnerOptions: [string, string][] = (() => {
     const m = new Map<string, { name: string; n: number }>();
@@ -3593,10 +3720,10 @@ function SignalFeed() {
   );
 
   return (
-    <div style={{ background: UI.game ? "transparent" : C.page, color: C.text, minHeight: "100%", padding: 18, fontFamily: UI.body }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+    <div className="bdr-page" style={{ background: UI.game ? "transparent" : C.page, color: C.text, minHeight: "100%", fontFamily: UI.body }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: SP.md, marginBottom: SP.lg }}>
         <div>
-          <div style={{ fontSize: fs(10), letterSpacing: 2, color: C.accent }}>BDR TERMINAL // INBOUND</div>
+          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: C.accent, fontWeight: 600 }}>BDR TERMINAL // INBOUND</div>
           <PageTitle text="Signal Feed" />
           <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
             {firstLoad ? "loading…" : `${scoped.length} contacts in scope · ${bucketCounts.active ?? 0} active · ${bucketCounts.retouch_due ?? 0} retouch due`}
@@ -3687,56 +3814,25 @@ function SignalFeed() {
       {q.isError ? (
         <div role="alert" style={{ color: C.danger, fontSize: fs(12) }}>{String(q.error)}</div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 370px) 1fr", gap: 12 }}>
-          <div style={{ ...PANEL(), maxHeight: 640, overflowY: "auto" }}>
+        <div className="bdr-split">
+          <div className="bdr-list" style={{ ...PANEL(), overflowY: "auto", overscrollBehavior: "contain" }}>
             {firstLoad ? (
               <div style={{ padding: 12 }}>
                 {Array.from({ length: 8 }).map((_, i) => <div key={i} className="animate-pulse" style={{ height: 46, background: C.surfaceAlt, borderRadius: UI.radius2, marginBottom: 8 }} />)}
               </div>
             ) : sorted.length === 0 ? (
               <div style={{ padding: 16, fontSize: fs(12), color: C.muted }}>Nothing here. {bucket === "active" ? "Queue clear — nice." : ""}</div>
-            ) : sorted.slice(0, shown).map((r) => {
-              const on = current?.contact_id === r.contact_id;
-              const lead = r.unhandled[0]?.sig ?? r.signals[0]?.sig ?? "";
-              const d = daysSince(r.last_touch);
-              return (
-                <div key={r.contact_id} onClick={() => setSelected(r.contact_id)} style={{
-                  padding: "8px 11px", cursor: "pointer", borderBottom: `1px solid ${C.border}`,
-                  borderLeft: `3px solid ${on ? (UI.game ? C.accent : sigMeta(lead).color) : "transparent"}`, background: on ? (UI.game ? C.accentDim : C.surfaceAlt) : "transparent",
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <span style={{ fontSize: fs(12.5), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      <input type="checkbox" checked={draftIds.has(r.contact_id)} onClick={(e) => e.stopPropagation()} onChange={() => toggleDraft(r)} title="Select for AI draft" style={{ marginRight: 6, verticalAlign: "middle", cursor: "pointer" }} />{multiOwner && <span style={{ fontSize: fs(9.5), color: C.page, background: r.queue_owner_id === acting ? C.accent : C.muted, borderRadius: 3, padding: "0 4px", marginRight: 6 }}>{initials(bdrName(r.queue_owner_id))}</span>}
-                      {UI.game && on ? "▶ " : ""}{r.contact_name || r.email}
-                    </span>
-                    <span style={{ display: "inline-flex", gap: 4, alignItems: "center", flexShrink: 0 }}>
-                      <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title="Open in HubSpot (h)" style={miniLink("#ff7a59")}>HS</a>
-                      {r.linkedin_url
-                        ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={(e) => e.stopPropagation()} title="Open LinkedIn (l)" style={miniLink("#5fb3ff")}><Linkedin size={10} /></a>
-                        : <span title="No LinkedIn on file" style={{ ...miniLink(C.faint), opacity: 0.35, cursor: "default" }}><Linkedin size={10} /></span>}
-                      <LiBadge li={liInfo(r.ov, r.hs_li)} />
-                      <span style={{ fontSize: fs(10), color: d == null || d > 7 ? C.danger : C.faint }}>{d == null ? "untouched" : `${d}d`}</span>
-                    </span>
-                  </div>
-                  <div style={{ fontSize: fs(10.5), color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", margin: "2px 0 5px" }}>
-                    {r.company || "—"} · created {fmtAgo(r.created)}
-                    {r.last_by && r.last_by_id !== r.queue_owner_id ? ` · last: ${r.last_by}` : ""}
-                    {r.ov?.retouch_on ? ` · ↻ ${r.ov.retouch_on}` : ""}
-                  </div>
-                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                    {r.signals.slice(0, 3).map((s) => <SignalTag key={s.sig} s={s} />)}
-                    {r.signals.length > 3 && <span style={{ fontSize: fs(10), color: C.faint }}>+{r.signals.length - 3}</span>}
-                  </div>
-                </div>
-              );
-            })}
+            ) : sorted.slice(0, shown).map((r) => (
+              <FeedRow key={r.contact_id} r={r} on={current?.contact_id === r.contact_id} drafted={draftIds.has(r.contact_id)} multiOwner={multiOwner}
+                onSelect={onSelectRow} onToggleDraft={onToggleDraftRow} />
+            ))}
             {!firstLoad && sorted.length > shown && (
               <button onClick={() => setShown(shown + 50)} style={{ ...btn(C.accent), margin: 10, width: "calc(100% - 20px)", justifyContent: "center" }}>
                 Show 50 more ({sorted.length - shown} left)
               </button>
             )}
           </div>
-          <div style={{ position: "sticky", top: 8, alignSelf: "start" }}>
+          <div className="bdr-detail" style={{ minWidth: 0 }}>
             {firstLoad ? <div className="animate-pulse" style={{ height: 460, background: C.surface, borderRadius: UI.radius }} />
               : current ? <Card key={current.contact_id} r={current} acting={acting} busy={busy} onAct={(t, x) => act(current, t, x)} runMsg={aq.msg} pendingKeys={aq.pendingKeys} stuck={aq.stuck} onRetry={aq.retry} />
               : <div style={{ fontSize: fs(12), color: C.muted }}>Select a contact.</div>}
@@ -3744,13 +3840,15 @@ function SignalFeed() {
         </div>
       )}
 
-      <div style={{ fontSize: fs(10), color: C.faint, marginTop: 12, lineHeight: 1.6 }}>
+      <Expander id="feed-help" title="How this feed works">
+      <div style={{ fontSize: fs(UI.game ? 12 : 10), color: C.faint, lineHeight: 1.7 }}>
         <div>Signals look back 30 days; "Active" = signal ≤14d with no touch since.</div>
         <div>Last touch = latest email/call/meeting by anyone (BDR, AE, CE) + LinkedIn logged here.</div>
         <div>HubSpot syncs ~every 4h, usage/AWR nightly.</div>
         <div>Actions apply instantly and save in batches via the bdr_terminal_log_action Flight (MotherDuck only, never HubSpot); only the queue owner can write.</div>
         <div>Post-SQA = the contact or its company has an SQA (BDR Terminal rules) that is open, won, or lost in the last 180 days; older closed-lost SQAs recycle back into the queue.</div>
       </div>
+      </Expander>
     </div>
   );
 }
@@ -3799,7 +3897,7 @@ export default function BdrTerminal() {
   const wrap: any = { padding: 18, background: game ? "transparent" : C.page, color: C.text };
   const rivet = (pos: any): any => ({ position: "absolute", width: 8, height: 8, borderRadius: 999, background: "#5fb3e6", boxShadow: "inset -1px -1px 0 #0a3550", ...pos });
   return (
-    <div className="bdr-root" style={{ background: UI.bg, minHeight: "100%", color: C.text, fontFamily: UI.body }}>
+    <div className="bdr-root" style={{ background: UI.bg, minHeight: "100%", color: C.text, fontFamily: UI.body, ["--bdr-hover" as any]: game ? "#f4f7fb" : "#1b241f" }}>
       <style>{FONT_CSS}</style>
       {game && (tab === "feed" || tab === "outbound") && <TrainingShowcase bdr={acting} ob={tab === "outbound"} />}
       <div style={{ position: "relative", display: "flex", gap: game ? 8 : 2, padding: game ? "14px 18px 0" : "10px 18px 0", background: game ? "transparent" : C.page, alignItems: "center", flexWrap: "wrap" }}>
