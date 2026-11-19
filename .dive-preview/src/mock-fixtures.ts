@@ -19,6 +19,16 @@ const gameRow = (ob: boolean, id = "89400804") => {
     active_days: 9,
   };
 };
+// Test switches in the preview URL:
+//   ?mockXp=<n>  -> the acting BDR's XP total is exactly n (e.g. 17572 sits 4 EXP below Lv 26, to test level-up)
+//   ?mockCap=1   -> today's LinkedIn (30) and queue hygiene (40) counts are at their daily caps
+const qp = () => new URLSearchParams(typeof location !== "undefined" ? location.search : "");
+const tweak = (row: Record<string, number>) => {
+  const xp = qp().get("mockXp");
+  if (xp != null) Object.keys(row).forEach((k) => { if (k !== "active_days") row[k] = 0; }), (row.emails_capped = Number(xp));
+  if (qp().has("mockCap")) { row.linkedin_today = 30; row.hygiene_today = 40; }
+  return row;
+};
 const idIn = (sql: string) => ROSTER_IDS.find((id) => sql.includes(`'${id}'`)) ?? "89400804";
 
 const ago = (h: number) => new Date(Date.now() - h * 3600e3).toISOString().slice(0, 19);
@@ -83,7 +93,7 @@ const obRows = outbound.map(([contact_name, title, company, company_id, signals_
 }));
 
 (globalThis as any).__MOCK_ROWS__ = (sql: string) => {
-  if (sql.includes("AS sqas_today")) return [gameRow(sql.includes("accts_opened"), idIn(sql))];
+  if (sql.includes("AS sqas_today")) return [tweak(gameRow(sql.includes("accts_opened"), idIn(sql)))];
   if (sql.includes("AS queue_owner_id")) return queueRows;
   if (sql.includes("outbound_play") && sql.includes("AS hs_ae_id")) return obRows;
   if (sql.includes("li_hist")) return overlayRows;

@@ -88,7 +88,20 @@ const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialia
 @keyframes bdrPop { 0%, 100% { transform: translateY(0) } 50% { transform: translateY(-6px) } }
 @keyframes bdrHop { 0%, 100% { transform: translateY(0) } 40% { transform: translateY(-5px) } 60% { transform: translateY(-5px) } }
 .bdr-hop { animation: bdrHop 1.1s ease-in-out infinite; }
-@media (prefers-reduced-motion: reduce) { .bdr-hop { animation: none; } }`;
+@keyframes bdrHopOnce { 0% { transform: translateY(0) } 28% { transform: translateY(-12px) } 52% { transform: translateY(0) } 68% { transform: translateY(-4px) } 100% { transform: translateY(0) } }
+@keyframes bdrDash { 0% { transform: translateX(0) } 30% { transform: translateX(10px) } 60% { transform: translateX(-3px) } 100% { transform: translateX(0) } }
+@keyframes bdrWiggle { 0%, 100% { transform: rotate(0) } 25% { transform: rotate(-8deg) } 75% { transform: rotate(8deg) } }
+@keyframes bdrSpark { 0% { opacity: 0; transform: scale(.3) } 30% { opacity: 1; transform: scale(1) } 100% { opacity: 0; transform: scale(1.25) translateY(-12px) } }
+@keyframes bdrCarry { 0% { opacity: 0; transform: translate(-40%, 8px) } 20% { opacity: 1; transform: translate(-40%, -8px) } 80% { opacity: 1; transform: translate(60%, -14px) } 100% { opacity: 0; transform: translate(80%, -18px) } }
+@keyframes bdrRise { 0% { opacity: 0; transform: translate(-50%, 6px) } 15% { opacity: 1 } 100% { opacity: 0; transform: translate(-50%, -30px) } }
+@keyframes bdrLine { 0% { opacity: 0; transform: translateY(4px) } 12% { opacity: 1; transform: none } 82% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes bdrBanner { 0% { opacity: 0; transform: translate(-50%, -16px) scale(.96) } 12% { opacity: 1; transform: translate(-50%, 0) scale(1) } 88% { opacity: 1 } 100% { opacity: 0 } }
+@keyframes bdrGlow { 0%, 100% { filter: drop-shadow(0 0 0 rgba(255,214,90,0)) } 50% { filter: drop-shadow(0 0 10px rgba(255,214,90,.95)) } }
+@media (prefers-reduced-motion: reduce) {
+  .bdr-hop { animation: none; } .bdr-fx, .bdr-fx * { animation: none !important; }
+  .bdr-root *, .bdr-root *::before, .bdr-root *::after { animation-iteration-count: 1 !important; animation-duration: .001ms !important; transition-duration: .001ms !important; }
+}`;
+const reducedMotion = () => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; } };
 // readable ink on a coloured badge
 const inkOn = (hex: string) => {
   const h = hex.replace("#", "");
@@ -1241,8 +1254,8 @@ function Card({ r, acting, busy, onAct, runMsg, pendingKeys, stuck, onRetry }: {
         ))}
       </div>
 
-      <CommandMenu mon={<Sprite map={lineFor(acting, false)[0].map} pal={palOf(acting, false, false)} h={56} fit="box" />}
-        prompt={<span>What will you do with <b>{(r.contact_name || r.email || "this lead").split(" ")[0]}</b>?</span>} items={[
+      <CommandMenu mon={<MonReactor bdr={acting} ob={false} h={56} />}
+        prompt={<FxPrompt bdr={acting} ob={false}><span>What will you do with <b>{(r.contact_name || r.email || "this lead").split(" ")[0]}</b>?</span></FxPrompt>} items={[
         { label: "DRAFT", c1: "#f08080", c2: "#d04848", title: "Write the next email", onClick: () => document.getElementById(`draft-${r.contact_id}`)?.scrollIntoView({ behavior: "smooth", block: "start" }) },
         { label: "RETOUCH", c1: "#f0b050", c2: "#d08820", disabled: dis, title: "Retouch in 3 days", onClick: () => onAct("retouch_set", { days: 3 }) },
         { label: "REVIEWED", c1: "#70c878", c2: "#3e9a4a", disabled: dis, title: "Mark reviewed (r)", onClick: () => onAct("reviewed") },
@@ -1423,6 +1436,8 @@ function xpOf(r: any, ob: boolean) {
   return finishXp(xp, today, c);
 }
 type XpInfo = ReturnType<typeof xpOf>;
+// Daily caps (events per day), same as the game SQL: a click past the cap earns 0 EXP
+const XP_CAP: Partial<Record<XpKind, number>> = { linkedin: 30, queue: 40 };
 // Terminal clicks that earn XP (credited optimistically until the ledger catches up)
 const xpForEvent = (t: string, ob: boolean): [XpKind, number] | null =>
   t.startsWith("linkedin_") ? ["linkedin", XP.linkedin]
@@ -2015,6 +2030,8 @@ function useTrainingXp(bdr: string, ob: boolean, qtr: { start: string; end: stri
   const r: any = (Array.isArray(g.data) ? g.data[0] : null) ?? {};
   const base = xpOf(r, ob);
   const [pend, setPend] = useState<{ kind: XpKind; xp: number; t: number }[]>([]);
+  const pendRef = useRef(pend); pendRef.current = pend;
+  const baseRef = useRef(base); baseRef.current = base;
   const seenToday = useRef(base.todayXp);
   const refetch = useRef(g.refetch);
   refetch.current = g.refetch;
@@ -2026,10 +2043,22 @@ function useTrainingXp(bdr: string, ob: boolean, qtr: { start: string; end: stri
     setPend((p) => p.filter((it) => { if (gained >= it.xp) { gained -= it.xp; return false; } return true; }));
   }, [base.todayXp]);
   useEffect(() => {
+    // Every queued action lands here. Work out the real gain (daily caps apply), credit it, then tell the
+    // creatures what happened ("bdr-fx") so their reaction shows the same number the ledger will count.
     const onGain = (e: any) => {
       const d = e.detail || {};
-      if (d.bdr !== bdr || !!d.ob !== ob) return;
-      setPend((p) => [...p, { kind: d.kind, xp: d.xp, t: Date.now() }]);
+      if (d.bdr !== bdr || (d.ob !== undefined && !!d.ob !== ob)) return;
+      let xp = 0, capped = false;
+      if (d.kind && d.xp > 0) {
+        const cap = XP_CAP[d.kind as XpKind];
+        const used = N((baseRef.current.todayCounts as any)[d.kind]) + pendRef.current.filter((p) => p.kind === d.kind).length;
+        if (cap != null && used >= cap) capped = true; else xp = d.xp;
+      }
+      const cur = baseRef.current.xp + pendRef.current.reduce((a, p) => a + p.xp, 0);
+      if (xp > 0) { const item = { kind: d.kind as XpKind, xp, t: Date.now() }; pendRef.current = [...pendRef.current, item]; setPend((p) => [...p, item]); }
+      const detail = { bdr, ob, t: d.t, kind: d.kind ?? null, xp, capped, lvBefore: levelOf(cur), lvAfter: levelOf(cur + xp), id: Date.now() + Math.random(), at: Date.now() };
+      lastFx = detail;
+      window.dispatchEvent(new CustomEvent("bdr-fx", { detail }));
     };
     const timers: any[] = [];
     const onSaved = (e: any) => {
@@ -2129,6 +2158,127 @@ function TodayLedger({ x, ob }: { x: XpInfo; ob: boolean }) {
   );
 }
 
+// ---- Task feedback: the creature "does" the task ----
+// useTrainingXp turns each queued action into a "bdr-fx" event with the real EXP (caps applied). These small
+// components listen for it, so only they re-render. Animations are CSS-only, <= 1.2s, and off for reduced motion.
+type FxMove = { move: string; anim: "hop" | "dash" | "wiggle" | "carry"; tail: string };
+const FX_MOVES: Record<string, FxMove> = {
+  reviewed: { move: "REVIEW", anim: "hop", tail: "The queue looks tidier." },
+  retouch_set: { move: "RETOUCH", anim: "wiggle", tail: "It'll circle back on schedule." },
+  retouch_clear: { move: "CLEAR", anim: "hop", tail: "Retouch cleared." },
+  note: { move: "TAKE NOTE", anim: "hop", tail: "Noted for later." },
+  linkedin_request_sent: { move: "CONNECT", anim: "dash", tail: "Request logged." },
+  linkedin_accepted: { move: "HANDSHAKE", anim: "hop", tail: "They accepted!" },
+  linkedin_message: { move: "DIRECT MESSAGE", anim: "dash", tail: "Message logged." },
+  linkedin_reply: { move: "REPLY CATCH", anim: "hop", tail: "They wrote back!" },
+  ae_assign: { move: "HANDOFF", anim: "dash", tail: "The AE has the account." },
+  gmail_open: { move: "DELIVER", anim: "carry", tail: "Draft carried to Gmail. Email EXP arrives once it's sent and syncs." },
+};
+const FX_ANIM: Record<FxMove["anim"], string> = { hop: "bdrHopOnce .7s ease-out", dash: "bdrDash .6s ease-out", wiggle: "bdrWiggle .45s ease-in-out 2", carry: "bdrHopOnce .7s ease-out" };
+const KIND_LABEL: Record<string, string> = { linkedin: "LinkedIn", queue: "queue hygiene" };
+// current creature form per BDR (published by the header showcase once EXP loads)
+type MonForm = { name: string; map: string[]; pal: any };
+const monForms: Record<string, MonForm> = {};
+const formKey = (bdr: string, ob: boolean) => `${bdr}:${ob ? 1 : 0}`;
+function useMonForm(bdr: string, ob: boolean): MonForm {
+  const k = formKey(bdr, ob);
+  const [f, setF] = useState<MonForm | null>(monForms[k] ?? null);
+  useEffect(() => {
+    setF(monForms[k] ?? null);
+    const on = (e: any) => { if (e.detail?.k === k) setF(e.detail.form); };
+    window.addEventListener("bdr-form", on);
+    return () => window.removeEventListener("bdr-form", on);
+  }, [k]);
+  const first = lineFor(bdr, ob)[0];
+  return f ?? { name: first.name, map: first.map, pal: palOf(bdr, ob, false) };
+}
+// Most recent reaction. Acting on a contact often moves the list on (it leaves the bucket), so the card creature
+// re-mounts right after the click; it picks this up and still plays the reaction.
+let lastFx: any = null;
+function useFx(bdr: string, ob: boolean, ms: number) {
+  const fresh = () => (lastFx && lastFx.bdr === bdr && !!lastFx.ob === ob && Date.now() - lastFx.at < Math.min(ms, 600) ? lastFx : null);
+  const [fx, setFx] = useState<any>(fresh);
+  useEffect(() => {
+    let t: any;
+    const show = (d: any) => {
+      setFx(d);
+      clearTimeout(t);
+      t = setTimeout(() => setFx((cur: any) => (cur?.id === d.id ? null : cur)), Math.max(0, ms - (Date.now() - d.at)));
+    };
+    const f = fresh();
+    if (f) show(f);
+    const on = (e: any) => { const d = e.detail || {}; if (d.bdr === bdr && !!d.ob === ob) show(d); };
+    window.addEventListener("bdr-fx", on);
+    return () => { window.removeEventListener("bdr-fx", on); clearTimeout(t); };
+  }, [bdr, ob, ms]);
+  return fx;
+}
+// The creature that acts: hops / dashes / wiggles / carries an envelope, sparkles, and pops the EXP it earned
+function MonReactor({ bdr, ob, h = 56 }: { bdr: string; ob: boolean; h?: number }) {
+  const form = useMonForm(bdr, ob);
+  const fx = useFx(bdr, ob, 1200);
+  const mv: FxMove | null = fx ? FX_MOVES[fx.t] ?? { move: "ACT", anim: "hop", tail: "" } : null;
+  const still = reducedMotion();
+  return (
+    <div className="bdr-fx" title={form.name} style={{ position: "relative", display: "inline-block", lineHeight: 0 }}>
+      <div key={fx?.id ?? "idle"} style={{ animation: mv && !still ? FX_ANIM[mv.anim] : undefined }}><Sprite map={form.map} pal={form.pal} h={h} fit="box" /></div>
+      {fx && mv && mv.anim !== "carry" && !still && [[-6, 6], [h - 6, 2], [h / 2, -10]].map(([x, y], i) => (
+        <span key={`${fx.id}-${i}`} aria-hidden="true" style={{ position: "absolute", left: x, top: y, fontSize: 12, color: "#f5b82e", animation: `bdrSpark .8s ease-out ${i * 0.08}s both`, pointerEvents: "none", lineHeight: 1 }}>✦</span>
+      ))}
+      {fx && mv?.anim === "carry" && (
+        <span aria-hidden="true" style={{ position: "absolute", left: "50%", top: -14, animation: still ? undefined : "bdrCarry 1.1s ease-in-out both", pointerEvents: "none", lineHeight: 0 }}>
+          <Mail size={18} color="#d04848" fill="#fff" />
+        </span>
+      )}
+      {fx && (fx.xp > 0 || fx.capped) && (
+        <span aria-hidden="true" style={{ position: "absolute", left: "50%", top: -8, transform: "translateX(-50%)", animation: still ? undefined : "bdrRise 1.1s ease-out both", pointerEvents: "none", lineHeight: 0,
+          filter: "drop-shadow(1px 1px 0 #fff) drop-shadow(-1px -1px 0 #fff)", whiteSpace: "nowrap" }}>
+          <PixelText text={fx.xp > 0 ? `+${fx.xp} EXP` : "CAP"} px={12} color={fx.xp > 0 ? "#2f8a40" : "#8b949e"} />
+        </span>
+      )}
+    </div>
+  );
+}
+// Dialog line: shows "<CREATURE> used <MOVE>!" after an action, then goes back to the normal prompt
+function FxPrompt({ bdr, ob, children }: { bdr: string; ob: boolean; children: any }) {
+  const form = useMonForm(bdr, ob);
+  const fx = useFx(bdr, ob, 2200); // text stays a little longer than the 1.2s motion so it can be read
+  if (!fx) return children;
+  const mv = FX_MOVES[fx.t] ?? { move: "ACT", anim: "hop", tail: "" };
+  const second = fx.xp > 0 ? `+${fx.xp} EXP. ${mv.tail}` : fx.capped ? `Daily ${KIND_LABEL[fx.kind] ?? fx.kind} cap reached, so no EXP this time. Still logged.` : mv.tail;
+  return (
+    <span key={fx.id} role="status" className="bdr-fx" style={{ display: "block", animation: reducedMotion() ? undefined : "bdrLine 2.2s ease-out both" }}>
+      <b>{form.name}</b> used <b>{mv.move}</b>!
+      {second && <span style={{ display: "block", fontSize: "0.9em", color: "#555" }}>{second}</span>}
+    </span>
+  );
+}
+// Level-up / evolution / shiny banner. Not modal: click it or press Esc to skip; it leaves on its own after ~2.6s.
+function Celebration({ c, onDone }: { c: { id: number; title: string; text: string; map: string[]; pal: any } | null; onDone: () => void }) {
+  useEffect(() => {
+    if (!c) return;
+    const t = setTimeout(onDone, 2600);
+    const k = (e: KeyboardEvent) => { if (e.key === "Escape") onDone(); };
+    window.addEventListener("keydown", k);
+    return () => { clearTimeout(t); window.removeEventListener("keydown", k); };
+  }, [c?.id]);
+  if (!c) return null;
+  const still = reducedMotion();
+  return (
+    <div key={c.id} role="status" aria-live="polite" onClick={onDone} className="bdr-fx" title="Click to skip"
+      style={{ position: "fixed", top: 16, left: "50%", transform: "translateX(-50%)", zIndex: 80, cursor: "pointer", display: "flex", alignItems: "center", gap: SP.lg,
+        background: "#ffffff", border: "3px solid #484848", boxShadow: "inset 0 0 0 2px #e8d18a, 0 12px 32px rgba(0,0,0,.25)", borderRadius: 12, padding: `${SP.md}px ${SP.xl}px ${SP.md}px ${SP.md}px`,
+        maxWidth: "calc(100vw - 32px)", animation: still ? undefined : "bdrBanner 2.6s ease-out both" }}>
+      <div style={{ ...STAGE(true), padding: "2px 12px 16px", lineHeight: 0, animation: still ? undefined : "bdrGlow .9s ease-in-out 2" }}><Sprite map={c.map} pal={c.pal} h={88} fit="box" /></div>
+      <div style={{ minWidth: 0 }}>
+        <PixelText text={c.title} px={21} color="#d04848" shadow="#f3d27a" />
+        <div style={{ fontFamily: FONT_GAME, fontSize: fs(14), color: "#303030", marginTop: SP.sm }}>{c.text}</div>
+        <div style={{ fontSize: fs(11), color: "#888", marginTop: SP.xs }}>Click or press Esc to skip</div>
+      </div>
+    </div>
+  );
+}
+
 // One creature in the header: sprite on its grass pad, level, EXP bar, today's gains
 function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: any; quota: number }) {
   const { g, r, x } = useTrainingXp(bdr, ob, qtr);
@@ -2138,11 +2288,14 @@ function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: 
   const stage = sqas >= t2 ? 2 : sqas >= t1 ? 1 : 0;
   const shiny = sqas >= q;
   const sp = lineFor(bdr, ob)[stage];
-  // "+EXP" pop-ups and a LEVEL UP flash when XP rises during the session
+  // "+EXP" pop-ups when XP rises during the session; a skippable banner for level-ups, evolutions and shiny
   const [floats, setFloats] = useState<{ id: number; amt: number; color: string }[]>([]);
   const [flash, setFlash] = useState(false);
+  const [cele, setCele] = useState<any>(null);
   const prev = useRef<XpInfo | null>(null);
+  const prevForm = useRef<{ stage: number; shiny: boolean } | null>(null);
   const loaded = Array.isArray(g.data);
+  const fx = useFx(bdr, ob, 800); // the header creature hops along with the card creature
   useEffect(() => {
     if (!loaded) return; // first load is not a "gain"
     const p = prev.current;
@@ -2153,24 +2306,44 @@ function ShowcaseCard({ bdr, ob, qtr, quota }: { bdr: string; ob: boolean; qtr: 
     const id = Date.now() + Math.random();
     const color = XP_KINDS.find((m) => m.k === best)!.color;
     setFloats((f) => [...f, { id, amt: Math.round(x.xp - p.xp), color }]);
-    setTimeout(() => setFloats((f) => f.filter((z) => z.id !== id)), 1700);
-    if (x.lv > p.lv) { setFlash(true); setTimeout(() => setFlash(false), 2600); }
+    setTimeout(() => setFloats((f) => f.filter((z) => z.id !== id)), 1200);
+    if (x.lv > p.lv) {
+      setFlash(true); setTimeout(() => setFlash(false), 1200);
+      setCele({ id, title: "LEVEL UP!", text: `${sp.name} grew to Lv ${x.lv}!`, map: sp.map, pal: palOf(bdr, ob, shiny) });
+    }
   }, [x.xp, loaded]);
+  // evolution / shiny happen when SQAs arrive from HubSpot (data refresh), never from a click
+  useEffect(() => {
+    if (!loaded) return;
+    const p = prevForm.current;
+    prevForm.current = { stage, shiny };
+    if (!p) return;
+    if (stage > p.stage) setCele({ id: Date.now(), title: "EVOLUTION!", text: `${lineFor(bdr, ob)[p.stage].name} evolved into ${sp.name}!`, map: sp.map, pal: palOf(bdr, ob, shiny) });
+    else if (shiny && !p.shiny) setCele({ id: Date.now(), title: "SHINY!", text: `${sp.name} is shining: quota reached!`, map: sp.map, pal: palOf(bdr, ob, true) });
+  }, [stage, shiny, loaded]);
+  // publish the current form so the card creature and dialog lines use the same creature
+  useEffect(() => {
+    if (!loaded) return;
+    const form = { name: sp.name, map: sp.map, pal: palOf(bdr, ob, shiny) };
+    monForms[formKey(bdr, ob)] = form;
+    window.dispatchEvent(new CustomEvent("bdr-form", { detail: { k: formKey(bdr, ob), form } }));
+  }, [sp.name, shiny, loaded, bdr, ob]);
   const lvUpsToday = x.lv - x.lvStart;
   return (
     <div style={{ ...PANEL(), flex: "1 1 330px", minWidth: 0, display: "flex", alignItems: "center", gap: 10, padding: "6px 14px 6px 6px", position: "relative" }}>
-      <div style={{ ...STAGE(shiny), padding: "2px 12px 16px", lineHeight: 0, position: "relative", animation: flash ? "bdrPop .5s steps(4) 3" : undefined }}>
-        {loaded ? <Sprite map={sp.map} pal={palOf(bdr, ob, shiny)} h={96} />
+      <Celebration c={cele} onDone={() => setCele(null)} />
+      <div className="bdr-fx" style={{ ...STAGE(shiny), padding: "2px 12px 16px", lineHeight: 0, position: "relative", animation: flash ? "bdrPop .4s steps(4) 3" : undefined }}>
+        {loaded ? <div key={fx?.id ?? "idle"} style={{ animation: fx && !reducedMotion() ? "bdrHopOnce .7s ease-out" : undefined }}><Sprite map={sp.map} pal={palOf(bdr, ob, shiny)} h={96} /></div>
           : <div title="Loading your EXP…" style={{ filter: "brightness(0)", opacity: 0.18 }}><Sprite map={lineFor(bdr, ob)[0].map} pal={palOf(bdr, ob, false)} h={96} /></div>}
         {floats.map((f) => (
           <span key={f.id} style={{ position: "absolute", left: "50%", top: 4, transform: "translateX(-50%)", fontSize: fs(13), fontWeight: 700, color: f.color, whiteSpace: "nowrap",
-            animation: "bdrFloat 1.2s ease-out forwards", pointerEvents: "none", lineHeight: 0, filter: "drop-shadow(1px 1px 0 #fff) drop-shadow(-1px -1px 0 #fff)" }}><PixelText text={`+${f.amt} EXP`} px={fs(12)} color={f.color} /></span>
+            animation: reducedMotion() ? undefined : "bdrFloat 1.2s ease-out forwards", pointerEvents: "none", lineHeight: 0, filter: "drop-shadow(1px 1px 0 #fff) drop-shadow(-1px -1px 0 #fff)" }}><PixelText text={`+${f.amt} EXP`} px={fs(12)} color={f.color} /></span>
         ))}
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 6 }}>
           <span style={{ fontSize: fs(9.5), letterSpacing: 1, color: C.accent }}>{ob ? "◎ OUTBOUND" : "◓ INBOUND"}</span>
-          {flash ? <span style={{ fontSize: fs(11), fontWeight: 700, color: "#d84040", animation: "bdrBlink .4s steps(1) infinite" }}>LEVEL UP!</span>
+          {flash ? <PixelText text="LEVEL UP!" px={11} color="#d84040" />
             : lvUpsToday > 0 ? <span style={{ fontSize: fs(9.5), fontWeight: 700, color: "#3a9a4a" }}>▲ {lvUpsToday} LV TODAY</span> : null}
         </div>
         <div style={{ display: "flex", alignItems: "baseline", gap: 8, margin: "1px 0 4px" }}>
@@ -2650,7 +2823,6 @@ function useActionQueue(acting: string, onSaved: () => void, ob = false) {
   const [msg, setMsg] = useState("");
   const [stuck, setStuck] = useState(false);
   const [since, setSince] = useState<number | null>(() => (lsGet(lsKey).length ? Date.now() : null));
-  const [, tick] = useState(0);
   const inflight = useRef<QEvt[]>([]);
   const activeRun = useRef<number | undefined>(undefined); // run number of the batch in flight
   const watchdog = useRef<any>(null);
@@ -2725,28 +2897,33 @@ function useActionQueue(acting: string, onSaved: () => void, ob = false) {
   useEffect(() => () => clearTimeout(watchdog.current), []);
 
   const pendingN = queue.length + inflightN;
-  // tick once a second while saving so the elapsed counter moves (Flight runs take ~5-10s end to end)
-  useEffect(() => {
-    if (!pendingN) return;
-    const t = setInterval(() => tick((n) => n + 1), 1000);
-    return () => clearInterval(t);
-  }, [pendingN]);
   const enqueue = (e: Omit<QEvt, "event_id">) => {
     setSince((s0) => s0 ?? Date.now());
     setQueue((q) => [...q, { event_id: newEventId(), by: acting, ...e }]);
     const gain = xpForEvent(e.event_type, ob);
-    if (gain) window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, ob, kind: gain[0], xp: gain[1] } }));
+    window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, ob, t: e.event_type, kind: gain?.[0] ?? null, xp: gain?.[1] ?? 0 } }));
   };
   const retry = () => { attempts.current = 0; setStuck(false); setMsg(""); setSince(Date.now()); };
   const pendingKeys = new Set([...queue, ...inflight.current].map((e) => `${e.contact_id ?? e.company_id}:${e.event_type}`));
-  const secs = since ? Math.max(0, Math.round((Date.now() - since) / 1000)) : 0;
-  const saving = msg.startsWith("✗") ? `${msg} · ${pendingN} unsaved`
-    : `⏳ saving ${pendingN} action${pendingN === 1 ? "" : "s"}… ${secs}s${secs < 15 ? " · usually ~8s" : " · still running, don't re-click"}`;
+  // while saving, SaveStatus renders the ticking "saving N… 4s" line itself (so the feed doesn't re-render every second)
+  const saving = msg.startsWith("✗") ? `${msg} · ${pendingN} unsaved` : `@saving:${pendingN}:${since ?? Date.now()}`;
   return { enqueue, pendingN, pendingKeys, stuck, retry, msg: pendingN ? saving : msg };
 }
 
 // Status line for the queue, with a Retry button once automatic retries are exhausted
 function SaveStatus({ msg, stuck, onRetry, block }: { msg: string; stuck?: boolean; onRetry?: () => void; block?: boolean }) {
+  const m = /^@saving:(\d+):(\d+)$/.exec(msg || "");
+  const [, tick] = useState(0);
+  useEffect(() => {
+    if (!m) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [!!m]);
+  if (m) {
+    const n = Number(m[1]);
+    const secs = Math.max(0, Math.round((Date.now() - Number(m[2])) / 1000));
+    msg = `⏳ saving ${n} action${n === 1 ? "" : "s"}… ${secs}s${secs < 15 ? " · usually ~8s" : " · still running, don't re-click"}`;
+  }
   if (!msg) return null;
   const bad = msg.startsWith("✗");
   return (
@@ -3027,7 +3204,12 @@ ORDER BY event_ts DESC LIMIT 1`);
             style={{ ...ctl, width: "100%", fontFamily: "ui-sans-serif, system-ui, sans-serif", fontSize: fs(13), lineHeight: 1.5, resize: "vertical" }} />
           <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, flexWrap: "wrap" }}>
             <a href={gmailUrl(me?.email ?? "", toEmail, cc, [HUBSPOT_BCC], noDash(subject), noDash(body))} target="_blank" rel="noopener noreferrer"
-              onClick={() => { setEdit((p) => ({ ...p, opened: true })); if (canSave) saver.save(r.contact_id, r.queue_owner_id, payload(true)); }}
+              onClick={() => {
+                setEdit((p) => ({ ...p, opened: true }));
+                if (canSave) saver.save(r.contact_id, r.queue_owner_id, payload(true));
+                // the creature carries the envelope; no EXP here (email EXP arrives when it's sent and syncs from HubSpot)
+                window.dispatchEvent(new CustomEvent("bdr-xp-gain", { detail: { bdr: acting, t: "gmail_open", kind: null, xp: 0 } }));
+              }}
               style={{ ...btn("#ff7a59"), textDecoration: "none" }}>
               <Mail size={12} /> Open in Gmail
             </a>
@@ -3518,6 +3700,12 @@ function OutboundFeed() {
                   </div>
                 </div>
 
+                {UI.game && (
+                  <div style={{ ...DIALOG(), display: "flex", alignItems: "center", gap: SP.md, marginTop: SP.lg }}>
+                    <div style={{ flexShrink: 0, lineHeight: 0 }}><MonReactor bdr={acting} ob h={52} /></div>
+                    <div style={{ minWidth: 0 }}><FxPrompt bdr={acting} ob>{cur.owner_id === acting ? <span>Which contact at <b>{cur.company}</b> will you work next?</span> : <span>This is {bdrName(cur.owner_id).split(" ")[0]}'s account. Switch "Acting as" to work it.</span>}</FxPrompt></div>
+                  </div>
+                )}
                 <Section title="AE">
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                     <b style={{ fontSize: fs(13) }}>{aeLabel(cur)}</b>
