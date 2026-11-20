@@ -11,11 +11,14 @@ Rules (first match wins; red = not a BDR lead, amber = still worth a look):
   1 AGENT_OR_RELAY_EMAIL        red    email domain in main.relay_domains (editable table)
   2 JOINED_EXISTING_ORG         red    earliest MotherDuck user for the email did not create their org
   3 NEW_TEAM_AT_PAYING_CUSTOMER red    created their org, but an older org on the same work domain has AWR > 0
-  4 NON_TECHNICAL               red    role_label = non_technical
-  5 INSUFFICIENT_INFO           red    role_label = unknown
-  6 TECH_NO_EMPLOYER            amber  role_label = tech_no_company
-  7 NO_MD_USER_MATCH            amber  role looks good, but no MotherDuck user has this email
-  WORKABLE                             role_label icp / tech_at_company and none of the above
+  4 UNWORKABLE_TITLE            red    role_label = unworkable_title (student, hourly/trades/retail, clinician, ...)
+  5 NON_TECHNICAL               red    role_label = non_technical (non-technical individual contributor: AE, SDR, recruiter, ...)
+  6 BUSINESS_EMAIL              none   role_label = unknown, but the email is on a business domain (workable: no enrichment
+                                       is a data gap, not a disqualifier)
+  7 INSUFFICIENT_INFO           red    role_label = unknown on a personal / school domain
+  8 TECH_NO_EMPLOYER            amber  role_label = tech_no_company
+  WORKABLE                             icp / tech_at_company / business_decision_maker. A MotherDuck account is NOT required:
+                                       event, content and form leads are workable too.
   PENDING                              no role label yet (not scored) and rules 1-3 don't match
 role_label comes from prompt_jev, which is not fully deterministic, so a contact is only re-scored when its
 prompt input (title, company, email domain, LinkedIn found) or email changes, or RULES_VERSION goes up.
@@ -30,7 +33,7 @@ import duckdb
 
 DB = "bdr_terminal_gamified"
 MDW_SHARE = "md:_share/mdw/8cdbf94d-7075-45a4-bf57-4fd19470e532"
-RULES_VERSION = 1
+RULES_VERSION = 2  # 2: decision makers + unworkable titles split out of non_technical; business-email rule
 SEED_RELAY = [
     ("agentmail.to", "AI agent inboxes (agentmail.to gives agents their own email)"),
     ("pm.me", "Proton relay alias"),
@@ -38,18 +41,26 @@ SEED_RELAY = [
     ("duck.com", "DuckDuckGo email protection relay"),
     ("70077007.xyz", "Disposable / agent signups seen Nov 2026"),
 ]
-PERSONAL = ["gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "qq.com", "163.com",
-            "proton.me", "protonmail.com", "live.com", "me.com", "googlemail.com"]
-INSTRUCTION = ("Classify this new signup for a cloud data warehouse (MotherDuck, built on DuckDB). "
-               "Judge only from the job title, company and email domain given.")
+PERSONAL = ["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com", "msn.com", "yahoo.com", "ymail.com",
+            "icloud.com", "me.com", "mac.com", "aol.com", "proton.me", "protonmail.com", "qq.com", "163.com", "126.com",
+            "foxmail.com", "sina.com", "yandex.ru", "yandex.com", "mail.ru", "gmx.com", "gmx.de", "gmx.net", "web.de",
+            "naver.com", "hanmail.net", "rediffmail.com", "hey.com", "fastmail.com", "tutanota.com", "zohomail.com"]
+# business domain = not personal, not a relay, not a school (.edu / .ac.xx); regional webmail variants caught by prefix
+BUSINESS_SQL = ("(dom <> '' AND dom NOT IN ({personal}) AND dom NOT IN (SELECT domain FROM main.relay_domains)"
+                " AND NOT regexp_matches(dom, '^(yahoo|hotmail|outlook|live|gmx|yandex)\\.')"
+                " AND NOT regexp_matches(dom, '(\\.edu$|\\.edu\\.|\\.ac\\.[a-z]+$|\\.k12\\.)'))")
+INSTRUCTION = ("Classify this new signup for a cloud data warehouse (MotherDuck, built on DuckDB) by whether a sales rep could work them. "
+               "Judge only from the job title, company and email domain given. Be generous: almost any decision maker at a real company is workable.")
 CHOICES = """[
-  {label: 'icp', description: 'data, analytics, data eng, ML/AI or software eng role, or a technical leader (CTO, VP Eng, head of data), at a real company with a work domain or a named employer'},
-  {label: 'tech_at_company', description: 'technical but less clearly data/software (IT, product, technical founder, consultant at a firm)'},
-  {label: 'tech_no_company', description: 'data/software person with no real employer (personal email, student, hobbyist, freelancer)'},
-  {label: 'non_technical', description: 'sales, marketing, HR, finance, ops'},
-  {label: 'unknown', description: 'not enough info'}
+  {label: 'icp', description: 'data, analytics, data engineering, ML/AI or software engineering role, or a technical leader (CTO, VP Eng, head of data), at a real company'},
+  {label: 'tech_at_company', description: 'technical but less clearly data/software (IT, product, technical founder, solutions or consulting at a firm)'},
+  {label: 'business_decision_maker', description: 'non-technical leader who sets strategy or budget at a real company: founder, owner, CEO, COO, CFO, partner, head/VP/director of finance, sales, operations, strategy or marketing'},
+  {label: 'non_technical', description: 'non-technical individual contributor at a real company who does not make buying decisions: account executive, SDR, sales or customer engineer, recruiter, HR generalist, marketing coordinator, accountant, assistant'},
+  {label: 'unworkable_title', description: 'person who could never buy business software for a company: student, retail or hourly worker, trades, driver, warehouse, healthcare practitioner (dentist, nurse), teacher, retired, unemployed'},
+  {label: 'tech_no_company', description: 'data/software person with no real employer: hobbyist, freelancer, personal project'},
+  {label: 'unknown', description: 'not enough info to tell'}
 ]"""
-ROLE_LABELS = ("icp", "tech_at_company", "tech_no_company", "non_technical", "unknown")
+ROLE_LABELS = ("icp", "tech_at_company", "business_decision_maker", "non_technical", "unworkable_title", "tech_no_company", "unknown")
 
 
 def now():
@@ -96,6 +107,7 @@ def main():
         sibling_paying BOOLEAN, sibling_org_name VARCHAR, sibling_awr DOUBLE, company_on_md BOOLEAN, company_on_md_org VARCHAR,
         agent_harness BOOLEAN, batch_signup BOOLEAN, batch_size INTEGER,
         facts_at TIMESTAMP, rules_version INTEGER)""")
+    con.execute("ALTER TABLE main.lead_workability ADD COLUMN IF NOT EXISTS is_business_domain BOOLEAN")
     ev("setup", "ok", effect="table:bdr_terminal_gamified.main.lead_workability")
 
     # 1) inbound leads in the lookback window, with the exact prompt input
@@ -232,33 +244,34 @@ def main():
         LEFT JOIN main.lead_workability w USING (contact_id)
         LEFT JOIN ovr o USING (contact_id)),
       z AS (
-        SELECT *, COALESCE(ovr, m_label) AS eff,
+        SELECT *, COALESCE(ovr, m_label) AS eff, {BUSINESS_SQL.format(personal=personal_sql)} AS biz,
           CASE WHEN is_relay THEN 'AGENT_OR_RELAY_EMAIL'
                WHEN is_org_creator = false THEN 'JOINED_EXISTING_ORG'
                WHEN sibling_paying THEN 'NEW_TEAM_AT_PAYING_CUSTOMER'
                WHEN COALESCE(ovr, m_label) IS NULL THEN 'PENDING'
+               WHEN COALESCE(ovr, m_label) = 'unworkable_title' THEN 'UNWORKABLE_TITLE'
                WHEN COALESCE(ovr, m_label) = 'non_technical' THEN 'NON_TECHNICAL'
+               WHEN COALESCE(ovr, m_label) = 'unknown' AND {BUSINESS_SQL.format(personal=personal_sql)} THEN 'BUSINESS_EMAIL'
                WHEN COALESCE(ovr, m_label) = 'unknown' THEN 'INSUFFICIENT_INFO'
                WHEN COALESCE(ovr, m_label) = 'tech_no_company' THEN 'TECH_NO_EMPLOYER'
-               WHEN user_id IS NULL THEN 'NO_MD_USER_MATCH'
                ELSE 'WORKABLE' END AS rsn,
           concat_ws(', ', COALESCE('"' || title || '"', 'No title'), COALESCE(company, 'no company'), dom) AS who
         FROM r)
       SELECT contact_id, created_ts, true, lead_source, dom, title IS NOT NULL, company IS NOT NULL, li_found,
         rsn,
-        CASE WHEN rsn IN ('AGENT_OR_RELAY_EMAIL', 'JOINED_EXISTING_ORG', 'NEW_TEAM_AT_PAYING_CUSTOMER', 'NON_TECHNICAL', 'INSUFFICIENT_INFO') THEN 'red'
-             WHEN rsn IN ('TECH_NO_EMPLOYER', 'NO_MD_USER_MATCH') THEN 'amber' WHEN rsn = 'WORKABLE' THEN 'none' END,
+        CASE WHEN rsn IN ('AGENT_OR_RELAY_EMAIL', 'JOINED_EXISTING_ORG', 'NEW_TEAM_AT_PAYING_CUSTOMER', 'UNWORKABLE_TITLE', 'NON_TECHNICAL', 'INSUFFICIENT_INFO') THEN 'red'
+             WHEN rsn = 'TECH_NO_EMPLOYER' THEN 'amber' WHEN rsn IN ('WORKABLE', 'BUSINESS_EMAIL') THEN 'none' END,
         CASE rsn
           WHEN 'AGENT_OR_RELAY_EMAIL' THEN 'Email on ' || dom || ' (relay or agent inbox domain)'
           WHEN 'JOINED_EXISTING_ORG' THEN 'Joined ' || COALESCE(org_name, 'an existing org') || ' (' || COALESCE(org_users, 0) || ' users, '
                || CASE WHEN org_awr > 0 THEN {money('org_awr')} || ' AWR)' ELSE 'free org)' END
           WHEN 'NEW_TEAM_AT_PAYING_CUSTOMER' THEN 'New org, but ' || COALESCE(sibling_org_name, 'another org') || ' on ' || dom || ' pays ' || {money('sibling_awr')} || ' AWR'
-          WHEN 'NO_MD_USER_MATCH' THEN who || ', no MotherDuck user with this email'
+          WHEN 'BUSINESS_EMAIL' THEN who || ' (business email, not enriched yet)'
           ELSE who END,
         m_label, m_conf, ovr, m_hash, m_ver, m_at,
         is_relay, user_id IS NOT NULL, user_id, user_ts, org_id, org_name, org_users, org_awr, is_org_creator,
         sibling_paying, sibling_org_name, sibling_awr, company_on_md, company_on_md_org, agent_harness, batch_signup, batch_size,
-        now()::TIMESTAMP, {RULES_VERSION}
+        now()::TIMESTAMP, {RULES_VERSION}, biz
       FROM z""")
     summ = con.execute("""SELECT reason, count(*) FROM main.lead_workability
         WHERE contact_id IN (SELECT contact_id FROM lw_stage.leads) GROUP BY 1 ORDER BY 2 DESC""").fetchall()
