@@ -1,7 +1,7 @@
 {
   "id": "4af76f58-f05b-404d-8f11-ab1f6b393b30",
   "name": "bdr_lead_workability",
-  "version": 2,
+  "version": 3,
   "schedule_cron": "7 * * * *",
   "max_runtime_sec": 1800,
   "instance_type": "F4",

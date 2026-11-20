@@ -97,7 +97,8 @@ type WkFix = Partial<Record<string, unknown>>;
 const wkBase = (id: string, dom: string, x: WkFix = {}) => ({
   contact_id: id, wk_scored: true, role_label: "icp", role_confidence: 0.88, role_override: null, is_relay: false, has_md_user: true, is_org_creator: true,
   sibling_paying: false, sibling_org_name: null, sibling_awr: 0, email_domain: dom, li_found: true, agent_harness: false, batch_signup: false, batch_size: 1,
-  company_on_md: false, company_on_md_org: null, org_name: "Personal org", org_users: 1, org_awr: 0, facts_at: ago(0.4), ...x,
+  company_on_md: false, company_on_md_org: null, org_name: "Personal org", org_users: 1, org_awr: 0, facts_at: ago(0.4),
+  is_business_domain: !/^(gmail\.com|agentmail\.to)$/.test(dom), ...x,
 });
 const wkFor: Record<string, WkFix> = {
   "9002": { role_label: "tech_at_company", role_confidence: 0.61 },
@@ -114,12 +115,12 @@ const wkRows = inbound.filter(([id]) => id !== "9016").map(([id, , , company]) =
 const FIRST = ["Avery", "Blake", "Casey", "Devon", "Emery", "Finley", "Harper", "Jordan", "Kai", "Logan", "Morgan", "Quinn", "Reese", "Rowan", "Sage", "Taylor"];
 const LAST = ["Stone", "Rivers", "Hart", "Lane", "Brooks", "Frost", "Wells", "Reyes", "Vance", "Ng", "Okafor", "Silva"];
 const COS = ["Acme", "Globex", "Initech", "Hooli", "Pied Piper", "Vandelay", "Wayne Data", "Stark Analytics", ""];
-const TITLES = ["Data Engineer", "Analytics Lead", "", "Marketing Manager", "Software Engineer", "", "Student", "Account Executive", "Head of Data", ""];
+const TITLES = ["Data Engineer", "Analytics Lead", "", "VP Finance", "Software Engineer", "", "Student", "Account Executive", "Head of Data", "", "Cashier"];
 const allLeadRows = Array.from({ length: 140 }, (_, i) => {
   const co = COS[i % COS.length], title = TITLES[(i * 7) % TITLES.length];
   const personal = !co || i % 5 === 0;
   const dom = i % 23 === 0 ? "agentmail.to" : personal ? "gmail.com" : co.toLowerCase().replace(/[^a-z]/g, "") + ".example";
-  const role = !title ? "unknown" : /Marketing|Account/.test(title) ? "non_technical" : title === "Student" ? "tech_no_company" : "icp";
+  const role = !title ? "unknown" : /Account/.test(title) ? "non_technical" : /VP Finance/.test(title) ? "business_decision_maker" : /Student|Cashier/.test(title) ? "unworkable_title" : "icp";
   const x: WkFix = { role_label: role, role_confidence: 0.55 + ((i * 13) % 45) / 100, li_found: i % 3 !== 0 };
   if (dom === "agentmail.to") x.is_relay = true;
   if (i % 11 === 0) Object.assign(x, { is_org_creator: false, org_name: "Contoso Demo", org_users: 120, org_awr: 48300, batch_signup: true, batch_size: 9 });

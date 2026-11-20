@@ -21,11 +21,15 @@ Flight id `4af76f58-f05b-404d-8f11-ab1f6b393b30`. Deploy changes with `motherduc
 | AGENT_OR_RELAY_EMAIL | red | email domain in `main.relay_domains` (edit that table to change the list) |
 | JOINED_EXISTING_ORG | red | the earliest MotherDuck user for the email did not create their org |
 | NEW_TEAM_AT_PAYING_CUSTOMER | red | created their org, but an older org on the same work domain has AWR > 0 |
-| NON_TECHNICAL | red | role = non_technical |
-| INSUFFICIENT_INFO | red | role = unknown |
+| UNWORKABLE_TITLE | red | role = unworkable_title: can't buy for a company (student, hourly, retail and trades, clinician, teacher) |
+| NON_TECHNICAL | red | role = non_technical: a non-technical individual contributor (AE, SDR, sales or customer engineer, recruiter) |
+| BUSINESS_EMAIL | none (workable) | role = unknown, but the email is on a business domain. Missing enrichment isn't a disqualifier. |
+| INSUFFICIENT_INFO | red | role = unknown on a personal or school domain |
 | TECH_NO_EMPLOYER | amber | role = tech_no_company |
-| NO_MD_USER_MATCH | amber | the role looks fine, but no MotherDuck user has this email |
-| WORKABLE | none | role = icp or tech_at_company |
+| WORKABLE | none | role = icp, tech_at_company or business_decision_maker (founders, heads of finance, sales, ops, strategy) |
+
+A MotherDuck account is not required to be workable. Event, content and form leads count.
+In the dive, the reasons that count as unworkable can be chosen ("Disqualify by" on All Leads, "Unworkability" on Inbound). The default is every red reason.
 
 Roles come from `prompt_jev`. A lead is only re-scored when its prompt input (title, company, email domain, LinkedIn found)
 or email changes, or when `RULES_VERSION` goes up. This keeps labels stable between runs. Later runs only classify new or changed leads, so they finish in seconds.
