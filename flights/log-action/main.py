@@ -9,6 +9,8 @@ Rules:
   * Contact actions: only the contact's queue-owner BDR (contact BDR Owner, falling back to Contact Owner
     when BDR Owner is blank, or the deal bdr_owner for no-show contacts).
   * ae_assign: only a BDR who owns at least one contact at that company.
+  * role_override: note = a lead-workability role label (or 'clear'); the lead_workability Flight and the
+    dive use the latest one instead of the model's label.
   * draft_saved: payload JSON (subject/body/...) stored as-is after key filtering.
   * Idempotent on event_id. Inputs are untrusted and validated; SQL is parameterized.
   * Valid events are written even if others in the batch are rejected; exit code 2 if any were rejected.
@@ -26,7 +28,9 @@ MDW_SHARE = "md:_share/mdw/8cdbf94d-7075-45a4-bf57-4fd19470e532"
 CONTACT_EVENTS = {
     "reviewed", "retouch_set", "retouch_clear", "note", "draft_saved",
     "linkedin_request_sent", "linkedin_accepted", "linkedin_message", "linkedin_reply",
+    "role_override",
 }
+ROLE_LABELS = {"icp", "tech_at_company", "tech_no_company", "non_technical", "unknown", "clear"}
 ACCOUNT_EVENTS = {"ae_assign"}
 PAYLOAD_KEYS = {"template_id", "subject", "body", "ai_subject", "ai_body", "edited", "opened_in_gmail", "cc", "flags"}
 
@@ -62,6 +66,10 @@ def validate(e: dict):
         row["retouch_on"] = date.today() + timedelta(days=int(d))
     if et == "note" and not note.strip():
         return None, "empty note"
+    if et == "role_override" and note.strip() not in ROLE_LABELS:
+        return None, "role_override note must be one of " + ", ".join(sorted(ROLE_LABELS))
+    if et == "role_override":
+        note = note.strip()
     if et == "draft_saved":
         p = e.get("payload")
         if isinstance(p, str):

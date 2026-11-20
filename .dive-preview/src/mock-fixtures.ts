@@ -92,7 +92,52 @@ const obRows = outbound.map(([contact_name, title, company, company_id, signals_
   calls_total: 0, calls_connected: 0, in_sequence: false, signals_json, post_sqa: false, ...x,
 }));
 
+// lead workability (fictional): facts per contact; the dive derives the reason from them
+type WkFix = Partial<Record<string, unknown>>;
+const wkBase = (id: string, dom: string, x: WkFix = {}) => ({
+  contact_id: id, wk_scored: true, role_label: "icp", role_confidence: 0.88, role_override: null, is_relay: false, has_md_user: true, is_org_creator: true,
+  sibling_paying: false, sibling_org_name: null, sibling_awr: 0, email_domain: dom, li_found: true, agent_harness: false, batch_signup: false, batch_size: 1,
+  company_on_md: false, company_on_md_org: null, org_name: "Personal org", org_users: 1, org_awr: 0, facts_at: ago(0.4), ...x,
+});
+const wkFor: Record<string, WkFix> = {
+  "9002": { role_label: "tech_at_company", role_confidence: 0.61 },
+  "9004": { is_org_creator: false, org_name: "Umbrella Labs", org_users: 42, org_awr: 38400 },
+  "9006": { role_label: "non_technical", role_confidence: 0.83 },
+  "9008": { role_label: "unknown", role_confidence: 0.93, li_found: false },
+  "9010": { sibling_paying: true, sibling_org_name: "Tyrell Analytics", sibling_awr: 14700 },
+  "9011": { role_label: "tech_no_company", role_confidence: 0.7 },
+  "9012": { has_md_user: false, org_name: null, org_users: null },
+  "9013": { agent_harness: true, company_on_md: true, company_on_md_org: "Oscorp Sandbox" },
+};
+const wkRows = inbound.filter(([id]) => id !== "9016").map(([id, , , company]) => wkBase(id, company.toLowerCase().replace(/[^a-z]/g, "") + ".example", wkFor[id]));
+// All Leads tab: a wider fictional set across ~4 weeks, mixing every reason
+const FIRST = ["Avery", "Blake", "Casey", "Devon", "Emery", "Finley", "Harper", "Jordan", "Kai", "Logan", "Morgan", "Quinn", "Reese", "Rowan", "Sage", "Taylor"];
+const LAST = ["Stone", "Rivers", "Hart", "Lane", "Brooks", "Frost", "Wells", "Reyes", "Vance", "Ng", "Okafor", "Silva"];
+const COS = ["Acme", "Globex", "Initech", "Hooli", "Pied Piper", "Vandelay", "Wayne Data", "Stark Analytics", ""];
+const TITLES = ["Data Engineer", "Analytics Lead", "", "Marketing Manager", "Software Engineer", "", "Student", "Account Executive", "Head of Data", ""];
+const allLeadRows = Array.from({ length: 140 }, (_, i) => {
+  const co = COS[i % COS.length], title = TITLES[(i * 7) % TITLES.length];
+  const personal = !co || i % 5 === 0;
+  const dom = i % 23 === 0 ? "agentmail.to" : personal ? "gmail.com" : co.toLowerCase().replace(/[^a-z]/g, "") + ".example";
+  const role = !title ? "unknown" : /Marketing|Account/.test(title) ? "non_technical" : title === "Student" ? "tech_no_company" : "icp";
+  const x: WkFix = { role_label: role, role_confidence: 0.55 + ((i * 13) % 45) / 100, li_found: i % 3 !== 0 };
+  if (dom === "agentmail.to") x.is_relay = true;
+  if (i % 11 === 0) Object.assign(x, { is_org_creator: false, org_name: "Contoso Demo", org_users: 120, org_awr: 48300, batch_signup: true, batch_size: 9 });
+  if (i % 17 === 0) Object.assign(x, { sibling_paying: true, sibling_org_name: "Globex Prod", sibling_awr: 22100 });
+  if (i % 13 === 0) x.has_md_user = false;
+  if (i % 9 === 0) x.agent_harness = true;
+  if (i % 29 === 0) x.wk_scored = false;
+  const name = `${FIRST[i % FIRST.length]} ${LAST[(i * 5) % LAST.length]}`;
+  return {
+    ...wkBase(String(9300 + i), dom, x), contact_name: name, email: `${name.split(" ")[0].toLowerCase()}@${dom}`, jobtitle: title || null, company: co || null,
+    lead_source: i % 4 ? "MotherDuck New User" : "Event Registration", linkedin_url: i % 3 ? "https://www.linkedin.com/in/example" : null,
+    queue_owner_id: i % 2 ? me : "89400805", owner_name: i % 2 ? "Rebecca Polak" : "Andrew Otterman", created_ts: ago(2 + i * 4.3),
+  };
+});
+
 (globalThis as any).__MOCK_ROWS__ = (sql: string) => {
+  if (sql.includes("AS lead_source") && sql.includes("lead_workability")) return allLeadRows;
+  if (sql.includes('"lead_workability" w') && sql.includes("role_override")) return wkRows;
   if (sql.includes("AS sqas_today")) return [tweak(gameRow(sql.includes("accts_opened"), idIn(sql)))];
   if (sql.includes("AS queue_owner_id")) return queueRows;
   if (sql.includes("outbound_play") && sql.includes("AS hs_ae_id")) return obRows;
