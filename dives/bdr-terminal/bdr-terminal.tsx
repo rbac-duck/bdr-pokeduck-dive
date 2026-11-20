@@ -65,8 +65,6 @@ const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialia
 .bdr-split > .bdr-detail { position: sticky; top: 8px; }
 .bdr-row { transition: background .12s; outline-offset: -2px; }
 .bdr-row:hover { background: var(--bdr-hover); }
-.bdr-row .bdr-row-links { opacity: 0; transition: opacity .12s; }
-.bdr-row:hover .bdr-row-links, .bdr-row:focus-within .bdr-row-links, .bdr-row[data-on="1"] .bdr-row-links { opacity: 1; }
 .bdr-cmd { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; margin: 16px 0 4px; }
 .bdr-cmd-btns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 @media (max-width: 560px) { .bdr-cmd { grid-template-columns: minmax(0, 1fr); } }
@@ -74,10 +72,8 @@ const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialia
 .bdr-root details > summary { list-style: none; cursor: pointer; }
 .bdr-root details > summary::-webkit-details-marker { display: none; }
 .bdr-root details[open] > summary .bdr-chev { transform: rotate(90deg); }
-@media (hover: none) { .bdr-row .bdr-row-links { opacity: 1; } }
-.bdr-row.bdr-lw-row .bdr-row-links { opacity: 1; }
 .bdr-lw-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 0.9fr) minmax(0, 1.3fr) minmax(0, 2.2fr) minmax(0, 1.3fr) 76px; gap: 12px; align-items: start; }
-@media (max-width: 760px) { .bdr-lw-row { grid-template-columns: minmax(0, 1fr); gap: 4px; } .bdr-lw-head { display: none !important; } .bdr-lw-row > .bdr-row-links { justify-content: flex-start !important; opacity: 1; } }
+@media (max-width: 760px) { .bdr-lw-row { grid-template-columns: minmax(0, 1fr); gap: 4px; } .bdr-lw-head { display: none !important; } .bdr-lw-row > .bdr-row-links { justify-content: flex-start !important; } }
 @media (max-width: 900px) {
   .bdr-page { padding: 16px; }
   .bdr-split { grid-template-columns: minmax(0, 1fr); }
@@ -4502,6 +4498,48 @@ const LeadRowView = memo(function LeadRowView({ r, open, dq, canEdit, onToggle, 
   );
 });
 
+// Waffle grid: 200 squares (each 0.5% of the leads in view). One muted color per disqualifying reason, white = still workable.
+const DQ_TINT: Record<string, string> = {
+  AGENT_OR_RELAY_EMAIL: "#b9a6cc", JOINED_EXISTING_ORG: "#9fb6d3", NEW_TEAM_AT_PAYING_CUSTOMER: "#a6c8b6", UNWORKABLE_TITLE: "#d6aaa4",
+  NON_TECHNICAL: "#dfc39e", INSUFFICIENT_INFO: "#c3bfb5", TECH_NO_EMPLOYER: "#d6cf9c", BUSINESS_EMAIL: "#a8ccd3",
+};
+const WAFFLE_CELLS = 200;
+function DqWaffle({ parts, total }: { parts: { k: string; label: string; n: number; color: string; dashed?: boolean }[]; total: number }) {
+  if (!total) return null;
+  // largest-remainder rounding so the squares always add up to exactly 200
+  const raw = parts.map((p) => (p.n / total) * WAFFLE_CELLS);
+  const cells = raw.map(Math.floor);
+  let left = WAFFLE_CELLS - cells.reduce((a, b) => a + b, 0);
+  raw.map((r, i) => [r - Math.floor(r), i] as [number, number]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { cells[i]++; left--; } });
+  const squares: { p: (typeof parts)[number] }[] = [];
+  parts.forEach((p, i) => { for (let c = 0; c < cells[i]; c++) squares.push({ p }); });
+  const pct = (n: number) => `${((n / total) * 100).toFixed(n / total < 0.1 ? 1 : 0)}%`;
+  const taken = parts.filter((p) => p.k !== "__ok" && p.k !== "__pending").reduce((a, p) => a + p.n, 0);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: SP.sm, flexWrap: "wrap" }}>
+        <div style={SECTION_TITLE()}>{UI.game ? "" : "// "}Leads taken out (each square = 0.5%)</div>
+        <div style={{ fontSize: fs(12.5), color: C.muted }}><b style={{ color: C.text }}>{pct(taken)}</b> taken out · {taken} of {total}</div>
+      </div>
+      <div role="img" aria-label={parts.map((p) => `${p.label} ${pct(p.n)}`).join(", ")}
+        style={{ display: "grid", gridTemplateColumns: "repeat(25, minmax(0, 1fr))", gap: 3, marginTop: SP.sm, padding: 6, borderRadius: UI.radius2, background: C.surfaceAlt, border: `1px solid ${C.border}` }}>
+        {squares.map((q, i) => (
+          <div key={i} title={`${q.p.label}: ${pct(q.p.n)} (${q.p.n})`}
+            style={{ aspectRatio: "1 / 1", borderRadius: 3, background: q.p.color, border: q.p.dashed ? `1px dashed ${C.border}` : "1px solid rgba(0,0,0,.06)" }} />
+        ))}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: `${SP.xs}px ${SP.md}px`, marginTop: SP.sm, fontSize: fs(12), color: C.muted }}>
+        {parts.filter((p) => p.n > 0).map((p) => (
+          <span key={p.k} style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+            <span style={{ width: 11, height: 11, borderRadius: 3, background: p.color, border: p.dashed ? `1px dashed ${C.border}` : "1px solid rgba(0,0,0,.12)" }} />
+            {p.label} <b style={{ color: C.text, fontVariantNumeric: "tabular-nums" }}>{pct(p.n)}</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AllLeadsTab() {
   const [acting] = useDiveState<string>("acting", "89400804");
   const [preset, setPreset] = useDiveState<string>("leadsRange", "14d");
@@ -4638,6 +4676,13 @@ function AllLeadsTab() {
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: SP.xs + 2, marginTop: SP.lg }}>
               {WK_ORDER.filter((k) => byReason[k]).map((k) => chip(k, WK_REASONS[k].label, byReason[k], wkColor(WK_REASONS[k].sev)))}
+            </div>
+            <div style={{ marginTop: SP.lg }}>
+              <DqWaffle total={n} parts={[
+                ...DQ_FACTORS.filter((k) => dq.includes(k)).map((k) => ({ k, label: WK_REASONS[k].label, n: byReason[k] ?? 0, color: DQ_TINT[k] })),
+                { k: "__ok", label: "Still workable", n: nOk, color: C.surface },
+                { k: "__pending", label: "Not scored yet", n: nPend, color: "transparent", dashed: true },
+              ]} />
             </div>
             {weekly.length > 1 && (
               <div style={{ marginTop: SP.lg }}>
