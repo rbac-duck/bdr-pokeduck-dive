@@ -1,0 +1,8 @@
+flowchart TD
+  setup[Ensure tables and relay domain list]:::query --> leads[Load inbound leads in the lookback window]:::query
+  leads --> facts[Join MotherDuck users, orgs, AWR and same-domain orgs]:::query
+  facts --> pick[Pick leads that are new, changed, or on an older rules version]:::query
+  pick --> classify[Classify roles with prompt_jev]:::query
+  classify --> write[Write lead_workability with reasons]:::load
+  write --> cleanup[Drop staging tables]:::step
+  class classify fraction

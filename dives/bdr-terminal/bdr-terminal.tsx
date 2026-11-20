@@ -1,5 +1,6 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSQLQuery, useDiveState, useRunFlight, useFlightRun } from "@motherduck/react-sql-query";
+import { Bar as RBar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
   ExternalLink, Linkedin, Search, AlertTriangle, Mail, TrendingUp, CalendarPlus, Coins, Rocket, Clock,
   Sparkles, Check, RotateCcw, ChevronDown, StickyNote, ArrowUpDown, X, Lock, Hand, Ticket, RefreshCw, BookOpen, Loader2, SlidersHorizontal,
@@ -74,6 +75,9 @@ const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialia
 .bdr-root details > summary::-webkit-details-marker { display: none; }
 .bdr-root details[open] > summary .bdr-chev { transform: rotate(90deg); }
 @media (hover: none) { .bdr-row .bdr-row-links { opacity: 1; } }
+.bdr-row.bdr-lw-row .bdr-row-links { opacity: 1; }
+.bdr-lw-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.4fr) minmax(0, 2.2fr) minmax(0, 1.2fr) 76px; gap: 12px; align-items: start; }
+@media (max-width: 760px) { .bdr-lw-row { grid-template-columns: minmax(0, 1fr); gap: 4px; } .bdr-lw-head { display: none !important; } .bdr-lw-row > .bdr-row-links { justify-content: flex-start !important; opacity: 1; } }
 @media (max-width: 900px) {
   .bdr-page { padding: 16px; }
   .bdr-split { grid-template-columns: minmax(0, 1fr); }
@@ -562,7 +566,148 @@ LEFT JOIN (
   WHERE event_type LIKE 'linkedin_%' AND contact_id IS NOT NULL GROUP BY 1
 ) li ON li.contact_id = q.contact_id`;
 
-type Sig = { sig: string; rnk: number; ts: number | null; detail: string; handled?: boolean };
+// ---- Lead workability: scored hourly by the bdr_lead_workability Flight into main.lead_workability ----
+// The Flight stores the facts (relay domain, MotherDuck user/org, AWR, same-domain orgs) and the model's role label.
+// The reason is recomputed here from those facts + the latest BDR override, so an override shows up immediately.
+// Keep wkReason() in step with the CASE in flights/lead-workability/main.py.
+const WORK_FLIGHT_ID = "4af76f58-f05b-404d-8f11-ab1f6b393b30"; // bdr_lead_workability (scheduled; the dive never runs it)
+type WkSev = "red" | "amber" | "none" | "pending";
+type Wk = {
+  scored: boolean; reason: string; sev: WkSev; evidence: string; role: string; model_role: string; conf: number | null; override: string;
+  is_relay: boolean; has_md_user: boolean; is_org_creator: boolean | null; sibling_paying: boolean; sibling_org_name: string; sibling_awr: number;
+  domain: string; li_found: boolean; agent_harness: boolean; batch_signup: boolean; batch_size: number; company_on_md: boolean; company_on_md_org: string;
+  org_name: string; org_users: number; org_awr: number; facts_at: number | null;
+};
+const WK_REASONS: Record<string, { label: string; short: string; sev: WkSev }> = {
+  AGENT_OR_RELAY_EMAIL: { label: "Agent or relay email", short: "Relay email", sev: "red" },
+  JOINED_EXISTING_ORG: { label: "Joined an existing org", short: "Joined org", sev: "red" },
+  NEW_TEAM_AT_PAYING_CUSTOMER: { label: "New team at a paying customer", short: "Paying customer", sev: "red" },
+  NON_TECHNICAL: { label: "Non-technical role", short: "Non-technical", sev: "red" },
+  INSUFFICIENT_INFO: { label: "Not enough info", short: "No info", sev: "red" },
+  TECH_NO_EMPLOYER: { label: "Technical, no employer", short: "No employer", sev: "amber" },
+  NO_MD_USER_MATCH: { label: "No MotherDuck user match", short: "No MD user", sev: "amber" },
+  WORKABLE: { label: "Workable", short: "Workable", sev: "none" },
+  PENDING: { label: "Not scored yet", short: "Pending", sev: "pending" },
+};
+const WK_ORDER = ["AGENT_OR_RELAY_EMAIL", "JOINED_EXISTING_ORG", "NEW_TEAM_AT_PAYING_CUSTOMER", "NON_TECHNICAL", "INSUFFICIENT_INFO", "TECH_NO_EMPLOYER", "NO_MD_USER_MATCH", "WORKABLE", "PENDING"];
+const ROLE_OPTS: [string, string][] = [["icp", "Data / software (ICP)"], ["tech_at_company", "Technical, at a company"], ["tech_no_company", "Technical, no employer"],
+  ["non_technical", "Non-technical"], ["unknown", "Not enough info"]];
+const ROLE_SET = new Set(ROLE_OPTS.map((o) => o[0]));
+const roleLabel = (v: string) => optLabel(ROLE_OPTS, v);
+const WORK_OPTS: [string, string][] = [["any", "any"], ["workable", "workable (incl. amber)"], ["unworkable", "unworkable (red)"]];
+const wkMatches = (f: string, w?: Wk) => f === "any" || (f === "workable" ? !!w && (w.sev === "none" || w.sev === "amber") : f === "unworkable" ? !!w && w.sev === "red" : true);
+const wkColor = (sev: WkSev) => (sev === "red" ? C.danger : sev === "amber" ? C.warn : sev === "none" ? C.ok : C.faint);
+function wkReason(w: Pick<Wk, "scored" | "is_relay" | "is_org_creator" | "sibling_paying" | "role" | "has_md_user">) {
+  if (!w.scored) return "PENDING";
+  if (w.is_relay) return "AGENT_OR_RELAY_EMAIL";
+  if (w.is_org_creator === false) return "JOINED_EXISTING_ORG";
+  if (w.sibling_paying) return "NEW_TEAM_AT_PAYING_CUSTOMER";
+  if (!w.role) return "PENDING";
+  if (w.role === "non_technical") return "NON_TECHNICAL";
+  if (w.role === "unknown") return "INSUFFICIENT_INFO";
+  if (w.role === "tech_no_company") return "TECH_NO_EMPLOYER";
+  if (!w.has_md_user) return "NO_MD_USER_MATCH";
+  return "WORKABLE";
+}
+function wkEvidence(w: Wk, title: string, company: string) {
+  const who = [title ? `"${title}"` : "No title", company || "no company", w.domain].filter(Boolean).join(", ");
+  switch (w.reason) {
+    case "AGENT_OR_RELAY_EMAIL": return `Email on ${w.domain} (relay or agent inbox domain)`;
+    case "JOINED_EXISTING_ORG": return `Joined ${w.org_name || "an existing org"} (${w.org_users} users, ${w.org_awr > 0 ? `${fmtUsd(w.org_awr)} AWR` : "free org"})`;
+    case "NEW_TEAM_AT_PAYING_CUSTOMER": return `New org, but ${w.sibling_org_name || "another org"} on ${w.domain} pays ${fmtUsd(w.sibling_awr)} AWR`;
+    case "NO_MD_USER_MATCH": return `${who}, no MotherDuck user with this email`;
+    case "PENDING": return "Not scored yet. The scoring Flight runs every hour.";
+    default: return who;
+  }
+}
+// title/company: the contact's current HubSpot values (evidence is rebuilt so it always matches the shown reason)
+function withRole(base: Wk, override: string, title: string, company: string): Wk {
+  const ovr = ROLE_SET.has(override) ? override : "";
+  const w: Wk = { ...base, override: ovr, role: ovr || base.model_role };
+  w.reason = wkReason(w); w.sev = WK_REASONS[w.reason].sev;
+  w.evidence = wkEvidence(w, title, company);
+  return w;
+}
+function toWk(r: any): Wk {
+  const base: Wk = {
+    scored: B(r.wk_scored), reason: "", sev: "pending", evidence: "", role: "", model_role: S(r.role_label), conf: r.role_confidence == null ? null : N(r.role_confidence), override: "",
+    is_relay: B(r.is_relay), has_md_user: B(r.has_md_user), is_org_creator: r.is_org_creator == null ? null : B(r.is_org_creator), sibling_paying: B(r.sibling_paying),
+    sibling_org_name: S(r.sibling_org_name), sibling_awr: N(r.sibling_awr), domain: S(r.email_domain), li_found: B(r.li_found),
+    agent_harness: B(r.agent_harness), batch_signup: B(r.batch_signup), batch_size: N(r.batch_size), company_on_md: B(r.company_on_md), company_on_md_org: S(r.company_on_md_org),
+    org_name: S(r.org_name), org_users: N(r.org_users), org_awr: N(r.org_awr), facts_at: T(S(r.facts_at)),
+  };
+  return withRole(base, S(r.role_override), S(r.jobtitle), S(r.company));
+}
+const wkTags = (w: Wk) => [
+  ...(w.agent_harness ? [{ k: "harness", label: "agent-harness first session", hint: "First MCP session came from the agent-harness/0.1.0 ai-sdk client within a day of signup. Owner of that client is unconfirmed, so this is a tag, not a reason." }] : []),
+  ...(w.batch_signup ? [{ k: "batch", label: `batch signup (${w.batch_size})`, hint: `${w.batch_size} users on ${w.domain} signed up within 10 minutes of this one. Looks like an onboarding session.` }] : []),
+  ...(w.company_on_md ? [{ k: "onmd", label: "company already on MD", hint: `Another free org on ${w.domain}${w.company_on_md_org ? ` (${w.company_on_md_org})` : ""} already exists. Still workable.` }] : []),
+];
+const wkTitle = (w: Wk) => [
+  `${WK_REASONS[w.reason]?.label ?? w.reason}: ${w.evidence}`,
+  w.role ? `Role: ${roleLabel(w.role)}${w.override ? " (BDR override)" : w.conf != null ? ` · model confidence ${Math.round(w.conf * 100)}%` : ""}` : "",
+  ...wkTags(w).map((t) => `Tag: ${t.label}`),
+].filter(Boolean).join("\n");
+// Shared column list for both tabs. Needs aliases w (lead_workability) and o (latest override).
+const WK_COLS = `w.contact_id IS NOT NULL AS wk_scored, w.role_label, w.role_confidence, o.lbl AS role_override, w.is_relay, w.has_md_user, w.is_org_creator,
+  w.sibling_paying, w.sibling_org_name, w.sibling_awr, w.email_domain, w.li_found, w.agent_harness, w.batch_signup, w.batch_size, w.company_on_md, w.company_on_md_org,
+  w.org_name, w.org_users, w.org_awr, strftime(w.facts_at, '%Y-%m-%dT%H:%M:%S') AS facts_at`;
+const WK_OVR = `(SELECT contact_id, arg_max(note, event_ts) AS lbl FROM "bdr_terminal_gamified"."main"."touch_events" WHERE event_type = 'role_override' AND contact_id IS NOT NULL GROUP BY 1)`;
+const workSql = `
+SELECT w.contact_id::VARCHAR AS contact_id, ${WK_COLS}
+FROM "bdr_terminal_gamified"."main"."lead_workability" w
+LEFT JOIN ${WK_OVR} o ON o.contact_id = w.contact_id`;
+
+// Small reason badge for list rows (nothing for workable unless asked). Tooltip carries the evidence.
+function WorkBadge({ w, showOk }: { w?: Wk; showOk?: boolean }) {
+  if (!w || (w.sev === "none" && !showOk)) return null;
+  const m = WK_REASONS[w.reason];
+  const col = wkColor(w.sev);
+  const g = UI.game;
+  return (
+    <span title={wkTitle(w)} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: fs(g ? 11 : 9.5), fontWeight: 700, lineHeight: 1.5, whiteSpace: "nowrap",
+      padding: g ? "1px 8px" : "0 6px", borderRadius: g ? 999 : 3, color: w.sev === "pending" ? C.faint : col, background: w.sev === "pending" ? "transparent" : `${col}18`,
+      border: w.sev === "pending" ? `1px dashed ${C.border}` : `1px solid ${col}66`, flexShrink: 0 }}>
+      {w.sev === "red" ? <AlertTriangle size={11} /> : w.sev === "none" ? <Check size={11} /> : null}{m?.short ?? w.reason}
+    </span>
+  );
+}
+function WkTagChips({ w }: { w: Wk }) {
+  return <>{wkTags(w).map((t) => (
+    <span key={t.k} title={t.hint} style={{ fontSize: fs(UI.game ? 10.5 : 9.5), color: C.muted, border: `1px dashed ${C.border}`, borderRadius: 999, padding: "0 7px", whiteSpace: "nowrap" }}>{t.label}</span>
+  ))}</>;
+}
+// Workability line for a contact card / expanded row: reason, evidence, role + confidence, and the owner's override.
+function WorkLine({ w, canEdit, onOverride }: { w: Wk; canEdit: boolean; onOverride: (label: string) => void }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: SP.xs, fontSize: fs(UI.game ? 12.5 : 11) }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center" }}>
+        <WorkBadge w={w} showOk />
+        <span style={{ color: C.muted, overflowWrap: "anywhere" }}>{w.evidence}</span>
+        <WkTagChips w={w} />
+      </div>
+      {w.scored && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center", color: C.faint }}>
+          <span>Role: <b style={{ color: C.muted }}>{w.role ? roleLabel(w.role) : "not classified"}</b>
+            {w.override ? <> · BDR override (model said {w.model_role ? roleLabel(w.model_role) : "nothing"})</> : w.conf != null ? <> · model confidence {Math.round(w.conf * 100)}%</> : null}
+            {" · "}LinkedIn {w.li_found ? "found" : "not found"}
+          </span>
+          {canEdit ? (
+            <label style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <span>Override</span>
+              <select value={w.override || ""} onChange={(e) => onOverride(e.target.value || "clear")} aria-label="Override the role label" style={{ ...ctl, cursor: "pointer", padding: "2px 6px", minHeight: 0 }}>
+                <option value="">use model</option>
+                {ROLE_OPTS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              </select>
+            </label>
+          ) : <span title="Only the contact's BDR owner can override the role">(override: BDR owner only)</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type Sig ={ sig: string; rnk: number; ts: number | null; detail: string; handled?: boolean };
 type Ov = {
   reviewed_ts: number | null; retouch_event_ts: number | null; retouch_on: string | null;
   linkedin_status: string; last_linkedin_ts: number | null; last_linkedin_actor: string; linkedin_14d: number;
@@ -580,6 +725,7 @@ type Row = {
   post_sqa: boolean; sqa_info: string;
   ov?: Ov; last_touch: number | null; last_by: string; last_by_id: string; last_channel: string;
   bucket: string; prio: number; unhandled: Sig[];
+  wk?: Wk;
 };
 
 function toRow(r: any): Row {
@@ -1234,6 +1380,7 @@ function Card({ r, acting, busy, onAct, runMsg, pendingKeys, stuck, onRetry }: {
             {r.owner_id && r.owner_id !== r.queue_owner_id ? ` · contact owner ${r.contact_owner || bdrName(r.owner_id)}` : ""}
             {r.ae_name ? ` · AE ${r.ae_name}` : ""}
           </div>
+          {r.wk && <div style={{ marginTop: SP.md }}><WorkLine w={r.wk} canEdit={canEdit} onOverride={(label) => onAct("role_override", { label })} /></div>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: SP.sm, alignItems: "stretch", flexShrink: 0 }}>
           <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" style={{ ...btn("#ff7a59"), textDecoration: "none" }}>HubSpot <ExternalLink size={12} /></a>
@@ -3801,6 +3948,7 @@ const FeedRow = memo(function FeedRow({ r, on, drafted, multiOwner, ov, accent, 
           {lead && <SignalTag s={lead} />}
           {more > 0 && <span style={{ fontSize: fs(g ? 11.5 : 10), color: C.faint }}>+{more}</span>}
           <LiBadge li={liInfo(ov ?? r.ov, r.hs_li)} />
+          <WorkBadge w={r.wk} />
         </div>
         <div style={{ fontSize: fs(g ? 12.5 : 10.5), color: C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: g ? 6 : 3 }}>
           {r.company || "—"} · created {fmtAgo(r.created)}
@@ -3836,6 +3984,7 @@ function SignalFeed() {
   const [touchedBy, setTouchedBy] = useDiveState<string>("touchedBy", "any");
   const [ctOwner, setCtOwner] = useDiveState<string>("ctOwner", "any");
   const [liF, setLiF] = useDiveState<string>("liF", "any");
+  const [workF, setWorkF] = useDiveState<string>("workF", "any");
   const [fresh, setFresh] = useDiveState<string>("fresh", "any");
   const [createdWin, setCreatedWin] = useDiveState<string>("created", "any");
   const [hasLi, setHasLi] = useDiveState<boolean>("hasLi", false);
@@ -3874,6 +4023,14 @@ function SignalFeed() {
     for (const [k, p] of Object.entries(pending)) m[k] = { ...(m[k] ?? toOv({})), ...p } as Ov;
     return m;
   }, [ovQ.data, pending]);
+  // lead workability (scored hourly by a Flight). Optional: if it fails, rows just show no badge.
+  const wkQ = useSQLQuery(workSql);
+  const [roleOv, setRoleOv] = useState<Record<string, string>>({});
+  const wkMap = useMemo(() => {
+    const m: Record<string, Wk> = {};
+    for (const r of Array.isArray(wkQ.data) ? wkQ.data : []) m[S(r.contact_id)] = toWk(r);
+    return m;
+  }, [wkQ.data]);
   const extraIds = ovRows.filter((r) => r.retouch_on).map((r) => S(r.contact_id)).filter((x) => /^\d+$/.test(x)).slice(0, 500);
   // freeze the retouch id list after the first overlay load: saves must not change the main query (that caused full reloads + page jumps)
   const extraRef = useRef<string | null>(null);
@@ -3897,8 +4054,13 @@ function SignalFeed() {
     catch { setCopyBox(text); }
   };
   const derived = useMemo(
-    () => rows.filter((r) => scopeIds.includes(r.queue_owner_id)).map((r) => derive(r, ovMap[r.contact_id])),
-    [rows, ovMap, ownersSql],
+    () => rows.filter((r) => scopeIds.includes(r.queue_owner_id)).map((r) => {
+      const d = derive(r, ovMap[r.contact_id]);
+      const w = wkMap[r.contact_id];
+      d.wk = w ? withRole(w, roleOv[r.contact_id] ?? w.override, r.jobtitle, r.company) : undefined;
+      return d;
+    }),
+    [rows, ovMap, ownersSql, wkMap, roleOv],
   );
 
   // 3) write path: batched action queue. Clicks apply instantly; one Flight run saves the batch.
@@ -3917,6 +4079,11 @@ function SignalFeed() {
     if (type === "retouch_clear") { patch.retouch_on = null; patch.retouch_event_ts = T(now); }
     if (type.startsWith("linkedin_")) { patch.linkedin_status = type; patch.last_linkedin_ts = T(now); patch.last_linkedin_actor = acting; patch.linkedin_14d = (r.ov?.linkedin_14d ?? 0) + 1; patch.li_hist = [...(r.ov?.li_hist ?? []), { t: type, ts: T(now), by: acting }]; }
     if (type === "note") { patch.last_note = extra.note; patch.last_note_ts = T(now); }
+    if (type === "role_override") {
+      setRoleOv((p) => ({ ...p, [r.contact_id]: extra.label === "clear" ? "" : extra.label }));
+      aq.enqueue({ event_type: type, contact_id: r.contact_id, note: String(extra.label) });
+      return;
+    }
     setPending((p) => ({ ...p, [r.contact_id]: { ...(p[r.contact_id] ?? {}), ...patch } }));
     // optimistic state holds for 15 min so a slow share sync never flips the contact back
     setTimeout(() => setPending((p) => { const n = { ...p }; delete n[r.contact_id]; return n; }), 900000);
@@ -3961,6 +4128,7 @@ function SignalFeed() {
     }),
     pages: (v: string[]) => (v.length ? (r) => v.some((p) => r.page_cats.includes(p)) : null),
     liF: (v: string) => (v === "any" ? null : (r) => liMatches(v, liInfo(r.ov, r.hs_li))),
+    workF: (v: string) => (v === "any" ? null : (r) => wkMatches(v, r.wk)),
     ctOwner: (v: string) => (v === "any" ? null : (r) => (v === "same" ? r.owner_id === r.queue_owner_id : v === "other" ? r.owner_id !== r.queue_owner_id : r.owner_id === v)),
     touchedBy: (v: string) => (v === "any" ? null : (r) => {
       const id = r.last_by_id;
@@ -3982,7 +4150,7 @@ function SignalFeed() {
     created: (v: string) => (v === "any" ? null : (r) => { const d = daysSince(r.created); return d != null && d <= Number(v); }),
     search: (v: string) => (v ? (r) => [r.contact_name, r.email, r.company, r.ae_name, r.last_by, r.org_name].some((x) => (x || "").toLowerCase().includes(v)) : null),
   }), [acting]);
-  const fstate: Record<string, any> = { sigs: sigSel, stage, plan, hasLi, opened, pages: Array.isArray(pages) ? pages : [], liF, ctOwner, touchedBy, fresh, created: createdWin, search: needle };
+  const fstate: Record<string, any> = { sigs: sigSel, stage, plan, hasLi, opened, pages: Array.isArray(pages) ? pages : [], liF, workF, ctOwner, touchedBy, fresh, created: createdWin, search: needle };
   const fkey = JSON.stringify(fstate);
   const preds = useMemo(() => Object.entries(fstate).map(([k, v]) => [k, FX[k](v)] as [string, ((r: Row) => boolean) | null]).filter(([, p]) => p) as [string, (r: Row) => boolean][], [fkey, FX]);
   const passExcept = (r: Row, except: string) => preds.every(([k, p]) => k === except || p(r));
@@ -4054,7 +4222,7 @@ function SignalFeed() {
     const list = [...m.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => ({ v: id, label: e.name }));
     return [{ v: "any", label: "anyone" }, { v: "same", label: "same as BDR owner" }, { v: "other", label: "someone else" }, ...list];
   }, [scoped]);
-  const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setLiF("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
+  const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setLiF("any"); setWorkF("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
   // filters living under "All filters" (for its badge) and the removable pills
   const moreActive = (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) + (liF !== "any" ? 1 : 0) +
     (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (opened !== "any" ? 1 : 0) + (Array.isArray(pages) && pages.length ? 1 : 0) + (showPost ? 1 : 0);
@@ -4063,6 +4231,7 @@ function SignalFeed() {
     ...sigSel.map((k) => ({ k: "s:" + k, label: k, color: CHIPS.find((c) => c[0] === k)?.[1], onRemove: () => setSigSel(sigSel.filter((x) => x !== k)) })),
     ...(ctOwner !== "any" ? [{ k: "co", label: `Contact owner: ${ctOwnerOptions.find((o) => o.v === ctOwner)?.label ?? ctOwner}`, onRemove: () => setCtOwner("any") }] : []),
     ...(liF !== "any" ? [{ k: "li", label: `LinkedIn: ${optLabel(LI_FILTER_OPTS, liF)}`, onRemove: () => setLiF("any") }] : []),
+    ...(workF !== "any" ? [{ k: "wk", label: `Workability: ${optLabel(WORK_OPTS, workF)}`, onRemove: () => setWorkF("any") }] : []),
     ...(touchedBy !== "any" ? [{ k: "tb", label: `Last touch by: ${optLabel(TOUCHED_OPTS, touchedBy)}`, onRemove: () => setTouchedBy("any") }] : []),
     ...(fresh !== "any" ? [{ k: "fr", label: `Freshness: ${optLabel(FRESH_OPTS, fresh)}`, onRemove: () => setFresh("any") }] : []),
     ...(opened !== "any" ? [{ k: "op", label: `Email opened: ${optLabel(OPENED_OPTS, opened)}`, onRemove: () => setOpened("any") }] : []),
@@ -4146,6 +4315,8 @@ function SignalFeed() {
             counts={() => { const m: Record<string, number> = Object.fromEntries(BUCKETS.map((b) => [b.id, 0])); const base = scoped.filter((r) => passExcept(r, "")); m.all = base.length; for (const r of base) m[r.bucket] = (m[r.bucket] ?? 0) + 1; return m; }} />
           <Dropdown label="Signals" multi options={CHIPS.map(([k, c]) => ({ v: k, label: k, color: c }))} values={sigSel} onChangeMulti={setSigSel}
             counts={() => countsFor("sigs", CHIPS.map(([k]) => k))} />
+          <Dropdown label="Workability" options={toOpts(WORK_OPTS)} value={workF} onChange={setWorkF} isDefault={workF === "any"} menuWidth={240}
+            counts={() => countsFor("workF", WORK_OPTS.map((o) => o[0]))} />
           <Dropdown label="Sort" options={toOpts(SORT_OPTS)} value={sortBy} onChange={setSortBy} isDefault={sortBy === "priority"} menuWidth={240} />
           <button type="button" onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")} title="Flip sort direction" aria-label={`Sort ${sortDir === "asc" ? "ascending" : "descending"}`}
             style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><ArrowUpDown size={14} /> {sortDir}</button>
@@ -4208,8 +4379,312 @@ function SignalFeed() {
         <div>Last touch = latest email/call/meeting by anyone (BDR, AE, CE) + LinkedIn logged here.</div>
         <div>HubSpot syncs ~every 4h, usage/AWR nightly.</div>
         <div>Actions apply instantly and save in batches via the bdr_terminal_log_action Flight (MotherDuck only, never HubSpot); only the queue owner can write.</div>
+        <div>Workability = the lead_workability table, rescored hourly by the bdr_lead_workability Flight (red = not a BDR lead, amber = worth a look, dashed = not scored yet). Hover a badge for the evidence. See the All Leads tab for the rules.</div>
         <div>Post-SQA = the contact or its company has an SQA (BDR Terminal rules) that is open, won, or lost in the last 180 days; older closed-lost SQAs recycle back into the queue.</div>
       </div>
+      </Expander>
+    </div>
+  );
+}
+
+// ---- ◇ ALL LEADS: every inbound MQL+ lead in a create-time window, with workability ----
+// Lead = mdw.hubspot.contacts, lifecyclestage NOT IN ('lead','') AND NOT NULL, marketable, not @motherduck.com (the Marketing
+// Dashboard's MQL+ count). Inbound = same split as the rest of the dive (no Apollo contacts, no Outbound-source deals), plus
+// calc_first_conversion <> 'Outbound / Prospecting'.
+const LEAD_RANGES: [string, string][] = [["today", "today (UTC)"], ["7d", "last 7 days"], ["14d", "last 14 days"], ["30d", "last 30 days"], ["fq", "this fiscal quarter"], ["custom", "custom range"]];
+const DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+const NOW_UTC = "(now() AT TIME ZONE 'UTC')";
+function leadRangeSql(preset: string, start: string, end: string): { from: string; to: string; ok: boolean } {
+  if (preset === "today") return { from: `date_trunc('day', ${NOW_UTC})`, to: `${NOW_UTC} + INTERVAL 1 DAY`, ok: true };
+  if (preset === "7d" || preset === "14d" || preset === "30d") return { from: `${NOW_UTC} - INTERVAL ${parseInt(preset, 10)} DAY`, to: `${NOW_UTC} + INTERVAL 1 DAY`, ok: true };
+  if (preset === "fq") { const q = currentQuarter(); return { from: `TIMESTAMP '${q.start} 00:00:00'`, to: `TIMESTAMP '${q.end} 00:00:00' + INTERVAL 1 DAY`, ok: true }; }
+  const ok = DT_RE.test(start) && DT_RE.test(end) && start < end; // validated before it reaches SQL
+  return ok ? { from: `TIMESTAMP '${start.replace("T", " ")}:00'`, to: `TIMESTAMP '${end.replace("T", " ")}:00'`, ok } : { from: "", to: "", ok: false };
+}
+function allLeadsSql(from: string, to: string) {
+  // filter the leads first (materialized), then join: joining before filtering took ~12s, this takes well under a second
+  return `
+WITH ob AS (
+  SELECT DISTINCT dca.contact_id::VARCHAR AS cid FROM "mdw"."hubspot"."deal_to_contact_associations" dca
+  JOIN "mdw"."hubspot"."deals" d ON d.hs_object_id::VARCHAR = dca.deal_id::VARCHAR WHERE d.deal_source_type = 'Outbound'
+),
+c AS MATERIALIZED (
+  SELECT c.hs_object_id::BIGINT AS cid, c.firstname, c.lastname, c.email, c.jobtitle, c.company, c.calc_first_conversion, c.linkedin_url, c.ap_linkedin_url,
+    c.cr_linkedin_username, COALESCE(NULLIF(c.bdr_owner,''), c.hubspot_owner_id) AS queue_owner_id, TRY_CAST(c.createdate AS TIMESTAMP) AS created
+  FROM "mdw"."hubspot"."contacts" c
+  WHERE c.lifecyclestage NOT IN ('lead', '') AND c.lifecyclestage IS NOT NULL AND c.hs_marketable_status = 'true'
+    AND c.email NOT LIKE '%@motherduck.com'
+    AND COALESCE(c.contact_source_label, '') <> 'Apollo' AND COALESCE(c.hs_object_source_detail_1, '') <> 'Apollo Integration'
+    AND COALESCE(c.calc_first_conversion, '') <> 'Outbound / Prospecting'
+    AND c.hs_object_id::VARCHAR NOT IN (SELECT cid FROM ob)
+    AND TRY_CAST(c.createdate AS TIMESTAMP) >= ${from} AND TRY_CAST(c.createdate AS TIMESTAMP) < ${to}
+)
+SELECT c.cid::VARCHAR AS contact_id,
+  NULLIF(TRIM(COALESCE(c.firstname,'') || ' ' || COALESCE(c.lastname,'')), '') AS contact_name,
+  c.email, NULLIF(trim(c.jobtitle), '') AS jobtitle, NULLIF(trim(c.company), '') AS company, c.calc_first_conversion AS lead_source,
+  COALESCE(NULLIF(c.linkedin_url,''), NULLIF(c.ap_linkedin_url,''),
+    CASE WHEN NULLIF(c.cr_linkedin_username,'') IS NOT NULL THEN 'https://www.linkedin.com/in/' || c.cr_linkedin_username END) AS linkedin_url,
+  c.queue_owner_id, TRIM(COALESCE(ow.firstName, '') || ' ' || COALESCE(ow.lastName, '')) AS owner_name,
+  strftime(c.created, '%Y-%m-%dT%H:%M:%S') AS created_ts,
+  ${WK_COLS}
+FROM c
+LEFT JOIN "bdr_terminal_gamified"."main"."lead_workability" w ON w.contact_id = c.cid
+LEFT JOIN ${WK_OVR} o ON o.contact_id = c.cid
+LEFT JOIN "mdw"."hubspot"."owners" ow ON ow.id = c.queue_owner_id
+ORDER BY c.created DESC
+LIMIT 20000`;
+}
+type LeadRow = { contact_id: string; name: string; email: string; title: string; company: string; source: string; linkedin_url: string; owner_id: string; owner_name: string; created: number | null; base: Wk; wk: Wk };
+const fmtUtc = (t: number | null) => (t == null ? "—" : new Date(t).toISOString().slice(0, 16).replace("T", " ") + " UTC");
+const fmtLocal = (t: number | null) => (t == null ? "" : new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }));
+const weekStart = (t: number) => { const d = new Date(t); const k = (d.getUTCDay() + 6) % 7; d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - k); return d.toISOString().slice(0, 10); };
+// datetime-local inputs hold UTC here; this shows the same moment in the viewer's zone
+const utcInputToLocal = (v: string) => (DT_RE.test(v) ? fmtLocal(Date.parse(v + ":00Z")) : "");
+const isoMinusDays = (d: number) => new Date(Date.now() - d * 864e5).toISOString().slice(0, 16);
+
+const LeadRowView = memo(function LeadRowView({ r, open, highlight, canEdit, onToggle, onOverride }:
+  { r: LeadRow; open: boolean; highlight: boolean; canEdit: boolean; onToggle: (id: string) => void; onOverride: (r: LeadRow, label: string) => void }) {
+  const w = r.wk;
+  const col = wkColor(w.sev);
+  const red = highlight && w.sev === "red";
+  const g = UI.game;
+  return (
+    <div style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `4px solid ${highlight && (w.sev === "red" || w.sev === "amber") ? col : "transparent"}`, background: red ? `${C.danger}0d` : undefined }}>
+      <div className="bdr-lw-row bdr-row" role="button" tabIndex={0} aria-expanded={open} onClick={() => onToggle(r.contact_id)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(r.contact_id); } }}
+        style={{ padding: g ? "10px 12px" : "7px 10px", cursor: "pointer" }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontSize: fs(g ? 14 : 12), fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name || r.email}</div>
+          <div style={{ fontSize: fs(g ? 12 : 10.5), color: C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {[r.title, r.company].filter(Boolean).join(" @ ") || "no title, no company"} · {w.domain || r.email.split("@")[1] || ""}
+          </div>
+        </div>
+        <div style={{ fontSize: fs(g ? 12 : 10.5), minWidth: 0 }} title={`${fmtUtc(r.created)}\n${fmtLocal(r.created)} (your time)`}>
+          <div style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtUtc(r.created)}</div>
+          <div style={{ color: C.faint, whiteSpace: "nowrap" }}>{fmtLocal(r.created)}</div>
+        </div>
+        <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}>
+          <WorkBadge w={w} showOk />
+          <span style={{ fontSize: fs(g ? 11.5 : 10), color: C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }} title={wkTitle(w)}>{w.evidence}</span>
+        </div>
+        <div style={{ fontSize: fs(g ? 12 : 10.5), color: C.muted, minWidth: 0 }}>
+          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.role ? roleLabel(w.role) : "—"}</div>
+          <div style={{ color: C.faint }}>{w.override ? "BDR override" : w.conf != null ? `${Math.round(w.conf * 100)}% confident` : ""}</div>
+        </div>
+        <div className="bdr-row-links" style={{ display: "flex", gap: SP.xs, alignItems: "center", justifyContent: "flex-end" }}>
+          <a href={HS_CONTACT(r.contact_id)} target="_blank" rel="noopener noreferrer" onClick={stopClick} title="Open in HubSpot" aria-label="Open in HubSpot" style={miniLink("#ff7a59")}>HS</a>
+          {r.linkedin_url
+            ? <a href={r.linkedin_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={stopClick} title="Open LinkedIn" aria-label="Open LinkedIn" style={miniLink("#5fb3ff")}><Linkedin size={13} /></a>
+            : <span title="No LinkedIn on file" style={{ ...miniLink(C.faint), opacity: 0.35, cursor: "default" }}><Linkedin size={13} /></span>}
+        </div>
+      </div>
+      {(open || wkTags(w).length > 0) && (
+        <div style={{ padding: g ? "0 12px 10px" : "0 10px 7px", display: "flex", flexDirection: "column", gap: SP.xs }}>
+          {!open && <div style={{ display: "flex", gap: SP.xs, flexWrap: "wrap" }}><WkTagChips w={w} /></div>}
+          {open && (
+            <>
+              <WorkLine w={w} canEdit={canEdit} onOverride={(label) => onOverride(r, label)} />
+              <div style={{ fontSize: fs(g ? 11.5 : 10), color: C.faint, overflowWrap: "anywhere" }}>
+                {r.email} · {r.source || "unknown source"} · BDR owner {r.owner_name || (r.owner_id ? bdrName(r.owner_id) : "none")}
+                {w.org_name ? ` · MotherDuck org ${w.org_name} (${w.org_users} users${w.org_awr > 0 ? `, ${fmtUsd(w.org_awr)} AWR` : ""}${w.is_org_creator ? ", they created it" : ""})` : w.scored ? " · no MotherDuck user for this email" : ""}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+});
+
+function AllLeadsTab() {
+  const [acting] = useDiveState<string>("acting", "89400804");
+  const [preset, setPreset] = useDiveState<string>("leadsRange", "14d");
+  const [start, setStart] = useDiveState<string>("leadsStart", "");
+  const [end, setEnd] = useDiveState<string>("leadsEnd", "");
+  const [showUnwork, setShowUnwork] = useDiveState<boolean>("leadsShowUnworkable", true); // checked = highlight, unchecked = hide
+  const [reasonF, setReasonF] = useDiveState<string>("leadsReason", "any");
+  const [search, setSearch] = useDiveState<string>("leadsQ", "");
+  const [shown, setShown] = useState(50);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [roleOv, setRoleOv] = useState<Record<string, string>>({});
+
+  const rng = leadRangeSql(preset, start, end);
+  const sql = useMemo(() => (rng.ok ? allLeadsSql(rng.from, rng.to) : ""), [rng.from, rng.to, rng.ok]);
+  const q = useSQLQuery(sql || "SELECT 1", { enabled: !!sql });
+  const aq = useActionQueue(acting, () => { setTimeout(() => q.refetch(), 30000); });
+
+  const rows: LeadRow[] = useMemo(() => (Array.isArray(q.data) ? q.data : []).map((x: any) => {
+    const base = toWk(x);
+    return { contact_id: S(x.contact_id), name: S(x.contact_name), email: S(x.email), title: S(x.jobtitle), company: S(x.company), source: S(x.lead_source),
+      linkedin_url: normUrl(S(x.linkedin_url)), owner_id: S(x.queue_owner_id), owner_name: S(x.owner_name), created: T(S(x.created_ts)), base, wk: base };
+  }), [q.data]);
+  const live = useMemo(() => rows.map((r) => (r.contact_id in roleOv ? { ...r, wk: withRole(r.base, roleOv[r.contact_id], r.title, r.company) } : r)), [rows, roleOv]);
+
+  const needle = search.trim().toLowerCase();
+  const searched = useMemo(() => (needle ? live.filter((r) => [r.name, r.email, r.company, r.title, r.wk.org_name].some((v) => (v || "").toLowerCase().includes(needle))) : live), [live, needle]);
+  const byReason = useMemo(() => { const m: Record<string, number> = {}; for (const r of searched) m[r.wk.reason] = (m[r.wk.reason] ?? 0) + 1; return m; }, [searched]);
+  const visible = useMemo(() => searched.filter((r) => (reasonF === "any" || r.wk.reason === reasonF) && (showUnwork || r.wk.sev !== "red")), [searched, reasonF, showUnwork]);
+  const hiddenN = showUnwork ? 0 : searched.filter((r) => (reasonF === "any" || r.wk.reason === reasonF) && r.wk.sev === "red").length;
+  useEffect(() => { setShown(50); }, [sql, reasonF, showUnwork, needle]);
+
+  const n = searched.length;
+  const cnt = (sev: WkSev) => searched.filter((r) => r.wk.sev === sev).length;
+  const nRed = cnt("red"), nAmber = cnt("amber"), nOk = cnt("none"), nPend = cnt("pending");
+  const pct = (k: number, of = n) => (of ? `${Math.round((k / of) * 100)}%` : "—");
+  const liFound = searched.filter((r) => r.wk.scored && r.wk.li_found).length;
+  const lastScored = Math.max(0, ...rows.map((r) => r.wk.facts_at ?? 0)) || null;
+  const weekly = useMemo(() => {
+    const m = new Map<string, { week: string; workable: number; worth: number; unworkable: number; pending: number }>();
+    for (const r of searched) {
+      if (r.created == null) continue;
+      const k = weekStart(r.created);
+      const e = m.get(k) ?? { week: k, workable: 0, worth: 0, unworkable: 0, pending: 0 };
+      if (r.wk.sev === "none") e.workable++; else if (r.wk.sev === "amber") e.worth++; else if (r.wk.sev === "red") e.unworkable++; else e.pending++;
+      m.set(k, e);
+    }
+    return [...m.values()].sort((a, b) => a.week.localeCompare(b.week)).map((e) => ({ ...e, label: e.week.slice(5) }));
+  }, [searched]);
+
+  const onToggle = useCallback((id: string) => setOpenId((o) => (o === id ? null : id)), []);
+  const api = useRef({ aq, acting });
+  api.current = { aq, acting };
+  const onOverride = useCallback((r: LeadRow, label: string) => {
+    if (r.owner_id !== api.current.acting) return;
+    setRoleOv((p) => ({ ...p, [r.contact_id]: label === "clear" ? "" : label }));
+    api.current.aq.enqueue({ event_type: "role_override", contact_id: r.contact_id, note: label });
+  }, []);
+
+  const rangeText = preset === "custom"
+    ? (rng.ok ? `${start.replace("T", " ")} → ${end.replace("T", " ")} UTC` : "pick a start and end (UTC)")
+    : preset === "fq" ? `${currentQuarter().label}: ${currentQuarter().start} → ${currentQuarter().end} UTC` : optLabel(LEAD_RANGES, preset);
+  const loading = !!sql && q.isLoading && rows.length === 0;
+  const g = UI.game;
+  const chip = (id: string, label: string, k: number, col: string) => (
+    <button key={id} type="button" onClick={() => setReasonF(reasonF === id ? "any" : id)} aria-pressed={reasonF === id}
+      title={reasonF === id ? "Show all reasons" : `Only ${label}`}
+      style={{ ...ctl, minHeight: 0, padding: "2px 10px", cursor: "pointer", display: "inline-flex", gap: 6, alignItems: "center",
+        borderColor: reasonF === id ? col : C.border, background: reasonF === id ? `${col}18` : C.surface }}>
+      <span style={{ width: 8, height: 8, borderRadius: 999, background: col, flexShrink: 0 }} />
+      <span>{label}</span><b style={{ fontVariantNumeric: "tabular-nums" }}>{k}</b>
+    </button>
+  );
+
+  return (
+    <div className="bdr-page" style={{ background: g ? "transparent" : C.page, color: C.text, minHeight: "100%", fontFamily: UI.body }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", flexWrap: "wrap", gap: SP.md, marginBottom: SP.lg }}>
+        <div>
+          <div style={{ fontSize: fs(10.5), letterSpacing: 2, color: trainerInk(), fontWeight: 700 }}>BDR TERMINAL // ALL INBOUND LEADS</div>
+          <PageTitle text="All Leads" />
+          <div style={{ fontSize: fs(11), color: C.muted, marginTop: 2 }}>
+            {rangeText} · {loading ? "loading…" : `${n} leads`}{lastScored ? ` · scores refreshed ${fmtAgo(lastScored)}` : ""}
+            <SaveStatus msg={aq.msg} stuck={aq.stuck} onRetry={aq.retry} />
+          </div>
+        </div>
+      </div>
+
+      {/* filters: create-time window + highlight / hide */}
+      <div style={{ ...PANEL(), padding: SP.md, marginBottom: SP.lg, display: "flex", flexDirection: "column", gap: SP.sm }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center" }}>
+          <SearchBox value={search} onChange={setSearch} placeholder="Name, email, company, org" />
+          <Dropdown label="Created" options={toOpts(LEAD_RANGES)} value={preset} isDefault={preset === "14d"} menuWidth={240}
+            onChange={(v) => { if (v === "custom" && !(DT_RE.test(start) && DT_RE.test(end))) { setStart(isoMinusDays(14)); setEnd(new Date().toISOString().slice(0, 16)); } setPreset(v); }} />
+          <Dropdown label="Reason" options={[{ v: "any", label: "any" }, ...WK_ORDER.map((k) => ({ v: k, label: WK_REASONS[k].label, color: wkColor(WK_REASONS[k].sev) }))]} value={reasonF}
+            onChange={setReasonF} isDefault={reasonF === "any"} menuWidth={280} counts={() => ({ any: n, ...byReason })} />
+          <label style={{ ...ctl, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }} title="Checked: unworkable leads stay in the list, highlighted red. Unchecked: they're hidden.">
+            <input type="checkbox" checked={showUnwork} onChange={(e) => setShowUnwork(e.target.checked)} style={{ width: 16, height: 16, margin: 0 }} />
+            Show unworkable <span style={{ color: C.faint }}>({showUnwork ? "highlighted" : "hidden"})</span>
+          </label>
+          <span style={{ flex: "1 1 0" }} />
+          <span style={{ fontSize: fs(12.5), color: C.faint, whiteSpace: "nowrap" }}>{visible.length} shown</span>
+          {hiddenN > 0 && (
+            <button type="button" onClick={() => setShowUnwork(true)} style={{ ...btn(C.danger) }}>{hiddenN} hidden · show them</button>
+          )}
+        </div>
+        {preset === "custom" && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: SP.md, alignItems: "center", fontSize: fs(12), color: C.muted }}>
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>From (UTC)
+              <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} style={{ ...ctl }} /></label>
+            <span style={{ color: C.faint }}>{utcInputToLocal(start)}</span>
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>To (UTC)
+              <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} style={{ ...ctl }} /></label>
+            <span style={{ color: C.faint }}>{utcInputToLocal(end)}</span>
+            {!rng.ok && <span style={{ color: C.danger }}>Start must be before end.</span>}
+          </div>
+        )}
+      </div>
+
+      {/* summary: totals, counts by reason, weekly trend */}
+      <div style={{ ...PANEL(), padding: g ? SP.lg : SP.md, marginBottom: SP.lg }}>
+        {loading ? <div style={{ height: 120, borderRadius: 8, background: C.surfaceAlt }} /> : (
+          <>
+            <div className="bdr-stats" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: SP.lg }}>
+              <Stat label="Leads" value={String(n)} sub={nPend ? `${nPend} not scored yet` : "all scored"} />
+              <Stat label="Workable" value={pct(nOk)} tone={C.ok} sub={`${nOk} leads`} />
+              <Stat label="Worth a look" value={pct(nAmber)} tone={C.warn} sub={`${nAmber} amber`} />
+              <Stat label="Unworkable" value={pct(nRed)} tone={C.danger} sub={`${nRed} red`} />
+              <Stat label="LinkedIn found" value={pct(liFound, n - nPend)} sub="of scored leads" />
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: SP.xs + 2, marginTop: SP.lg }}>
+              {WK_ORDER.filter((k) => byReason[k]).map((k) => chip(k, WK_REASONS[k].label, byReason[k], wkColor(WK_REASONS[k].sev)))}
+            </div>
+            {weekly.length > 1 && (
+              <div style={{ marginTop: SP.lg }}>
+                <div style={SECTION_TITLE()}>{g ? "" : "// "}Weekly trend (by create week, Monday UTC)</div>
+                <div style={{ height: 180, marginTop: SP.sm }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={weekly} margin={{ top: 4, right: 8, bottom: 0, left: -16 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke={C.border} vertical={false} />
+                      <XAxis dataKey="label" fontSize={11} tick={{ fill: C.faint }} tickLine={false} axisLine={{ stroke: C.border }} />
+                      <YAxis fontSize={11} tick={{ fill: C.faint }} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, fontSize: 12 }} labelFormatter={(l) => `Week of ${l}`} />
+                      <RBar dataKey="workable" name="Workable" stackId="a" fill={C.ok} isAnimationActive={false} />
+                      <RBar dataKey="worth" name="Worth a look" stackId="a" fill={C.warn} isAnimationActive={false} />
+                      <RBar dataKey="unworkable" name="Unworkable" stackId="a" fill={C.danger} isAnimationActive={false} />
+                      <RBar dataKey="pending" name="Not scored" stackId="a" fill={C.border} isAnimationActive={false} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {q.isError ? (
+        <div role="alert" style={{ color: C.danger, fontSize: fs(12) }}>{String(q.error)}</div>
+      ) : (
+        <div style={{ ...PANEL(), overflow: "hidden" }}>
+          <div className="bdr-lw-row bdr-lw-head" style={{ padding: g ? "8px 12px 8px 16px" : "6px 10px 6px 14px", borderBottom: `1px solid ${C.border}`, fontSize: fs(11), color: C.faint, textTransform: "uppercase", letterSpacing: 0.6 }}>
+            <span>Lead</span><span>Created (UTC / yours)</span><span>Reason</span><span>Role</span><span />
+          </div>
+          {!rng.ok ? <EmptyMon bdr={acting} ob={false} title="Pick a range">Choose a start and end time (UTC) for the custom range.</EmptyMon>
+            : loading ? <LoadingMon bdr={acting} ob={false} label="Counting every lead in the tall grass" />
+            : visible.length === 0 ? (
+              <EmptyMon bdr={acting} ob={false} title="No leads here">
+                {hiddenN ? <>All {hiddenN} are unworkable and hidden. <button type="button" onClick={() => setShowUnwork(true)} style={{ border: "none", background: "transparent", color: C.accent, cursor: "pointer", fontWeight: 600, fontSize: "inherit", padding: 0 }}>Show them</button></> : "Nothing matches this range and these filters."}
+              </EmptyMon>
+            ) : visible.slice(0, shown).map((r) => (
+              <LeadRowView key={r.contact_id} r={r} open={openId === r.contact_id} highlight={showUnwork} canEdit={!!r.owner_id && r.owner_id === acting} onToggle={onToggle} onOverride={onOverride} />
+            ))}
+          {visible.length > shown && (
+            <button onClick={() => setShown(shown + 50)} style={{ ...btn(C.accent), margin: 10, width: "calc(100% - 20px)", justifyContent: "center" }}>
+              Show 50 more ({visible.length - shown} left)
+            </button>
+          )}
+        </div>
+      )}
+
+      <Expander id="leads-help" title="How workability is decided" defaultOpen={false}>
+        <div style={{ fontSize: fs(g ? 12 : 10), color: C.faint, lineHeight: 1.7, display: "flex", flexDirection: "column", gap: 4 }}>
+          <div>Leads: HubSpot contacts at lifecycle stage beyond Lead, marketable, not @motherduck.com, inbound only (no Apollo contacts, no Outbound-source deals, not "Outbound / Prospecting"). Lead date = HubSpot create date, in UTC.</div>
+          <div>Rules, first match wins. <b style={{ color: C.danger }}>Red</b>: agent or relay email domain (editable list in main.relay_domains); joined an existing MotherDuck org; created a new org while another org on the same work domain pays; non-technical role; not enough info. <b style={{ color: C.warn }}>Amber</b>: technical but no employer; role looks good but no MotherDuck user has this email. Everything else with a data or technical role is workable.</div>
+          <div>Role labels come from prompt_jev on job title, company, email domain and whether LinkedIn was found. They are judgments from a few fields: the confidence is shown, and the BDR owner can override one (saved in the terminal ledger like every other action). A lead is re-scored only when its title, company or email changes, so labels don't drift between runs.</div>
+          <div>Scores refresh hourly via the bdr_lead_workability Flight ({WORK_FLIGHT_ID.slice(0, 8)}). Leads it hasn't reached yet show as "Pending", not workable.</div>
+          <div style={{ marginTop: 4, color: C.muted, fontWeight: 600 }}>Known gaps</div>
+          <div>About 60% of unworkable leads have no title or company. That's a data-quality gap, not the classifier: Clay gives every lead it touches a fit score whether or not it matched anyone, so "enriched" isn't a success signal. "LinkedIn found" is the better one (shown above).</div>
+          <div>The agent-harness/0.1.0 ai-sdk MCP client brought about 90 new users a week from Nov 2; who owns it is unconfirmed, so it's a tag (first MCP session within a day of signup), not a reason. "Batch signup" tags 5+ users on one domain within 10 minutes, which usually means an onboarding session.</div>
+          <div>The Marketing Dashboard still counts people who joined an existing org as "New User". This tab marks them unworkable for BDRs, so its totals will differ from that dashboard.</div>
+        </div>
       </Expander>
     </div>
   );
@@ -4256,7 +4731,7 @@ export default function BdrTerminal() {
   UI.trainer = trainerOf(acting).color;
   const game = UI.game;
   const me = bdrName(acting);
-  const TABS: [string, string, string][] = [["feed", "▤ SIGNAL FEED", "INBOUND"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
+  const TABS: [string, string, string][] = [["feed", "▤ SIGNAL FEED", "INBOUND"], ["leads", "◇ ALL LEADS", "ALL LEADS"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
   const wrap: any = { background: game ? "transparent" : C.page, color: C.text };
   const rivet = (pos: any): any => ({ position: "absolute", width: 8, height: 8, borderRadius: 999, background: "#5fb3e6", boxShadow: "inset -1px -1px 0 #0a3550", ...pos });
   return (
@@ -4292,6 +4767,8 @@ export default function BdrTerminal() {
         ? <OutboundFeed />
         : tab === "league"
         ? <div className="bdr-page" style={wrap}><LeagueTab /></div>
+        : tab === "leads"
+        ? <AllLeadsTab />
         : <SignalFeed />}
     </div>
   );
