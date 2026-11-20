@@ -65,8 +65,6 @@ const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialia
 .bdr-split > .bdr-detail { position: sticky; top: 8px; }
 .bdr-row { transition: background .12s; outline-offset: -2px; }
 .bdr-row:hover { background: var(--bdr-hover); }
-.bdr-row .bdr-row-links { opacity: 0; transition: opacity .12s; }
-.bdr-row:hover .bdr-row-links, .bdr-row:focus-within .bdr-row-links, .bdr-row[data-on="1"] .bdr-row-links { opacity: 1; }
 .bdr-cmd { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 10px; margin: 16px 0 4px; }
 .bdr-cmd-btns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
 @media (max-width: 560px) { .bdr-cmd { grid-template-columns: minmax(0, 1fr); } }
@@ -74,10 +72,8 @@ const FONT_CSS = `.bdr-root { line-height: 1.5; -webkit-font-smoothing: antialia
 .bdr-root details > summary { list-style: none; cursor: pointer; }
 .bdr-root details > summary::-webkit-details-marker { display: none; }
 .bdr-root details[open] > summary .bdr-chev { transform: rotate(90deg); }
-@media (hover: none) { .bdr-row .bdr-row-links { opacity: 1; } }
-.bdr-row.bdr-lw-row .bdr-row-links { opacity: 1; }
-.bdr-lw-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 1.4fr) minmax(0, 2.2fr) minmax(0, 1.2fr) 76px; gap: 12px; align-items: start; }
-@media (max-width: 760px) { .bdr-lw-row { grid-template-columns: minmax(0, 1fr); gap: 4px; } .bdr-lw-head { display: none !important; } .bdr-lw-row > .bdr-row-links { justify-content: flex-start !important; opacity: 1; } }
+.bdr-lw-row { display: grid; grid-template-columns: minmax(0, 2.2fr) minmax(0, 0.9fr) minmax(0, 1.3fr) minmax(0, 2.2fr) minmax(0, 1.3fr) 76px; gap: 12px; align-items: start; }
+@media (max-width: 760px) { .bdr-lw-row { grid-template-columns: minmax(0, 1fr); gap: 4px; } .bdr-lw-head { display: none !important; } .bdr-lw-row > .bdr-row-links { justify-content: flex-start !important; } }
 @media (max-width: 900px) {
   .bdr-page { padding: 16px; }
   .bdr-split { grid-template-columns: minmax(0, 1fr); }
@@ -574,7 +570,7 @@ const WORK_FLIGHT_ID = "4af76f58-f05b-404d-8f11-ab1f6b393b30"; // bdr_lead_worka
 type WkSev = "red" | "amber" | "none" | "pending";
 type Wk = {
   scored: boolean; reason: string; sev: WkSev; evidence: string; role: string; model_role: string; conf: number | null; override: string;
-  is_relay: boolean; has_md_user: boolean; is_org_creator: boolean | null; sibling_paying: boolean; sibling_org_name: string; sibling_awr: number;
+  is_relay: boolean; is_business: boolean; has_md_user: boolean; is_org_creator: boolean | null; sibling_paying: boolean; sibling_org_name: string; sibling_awr: number;
   domain: string; li_found: boolean; agent_harness: boolean; batch_signup: boolean; batch_size: number; company_on_md: boolean; company_on_md_org: string;
   org_name: string; org_users: number; org_awr: number; facts_at: number | null;
 };
@@ -582,31 +578,36 @@ const WK_REASONS: Record<string, { label: string; short: string; sev: WkSev }> =
   AGENT_OR_RELAY_EMAIL: { label: "Agent or relay email", short: "Relay email", sev: "red" },
   JOINED_EXISTING_ORG: { label: "Joined an existing org", short: "Joined org", sev: "red" },
   NEW_TEAM_AT_PAYING_CUSTOMER: { label: "New team at a paying customer", short: "Paying customer", sev: "red" },
-  NON_TECHNICAL: { label: "Non-technical role", short: "Non-technical", sev: "red" },
-  INSUFFICIENT_INFO: { label: "Not enough info", short: "No info", sev: "red" },
+  UNWORKABLE_TITLE: { label: "Unworkable title", short: "Unworkable title", sev: "red" },
+  NON_TECHNICAL: { label: "Non-technical, not a decision maker", short: "Non-technical", sev: "red" },
+  INSUFFICIENT_INFO: { label: "Not enough info (personal email)", short: "No info", sev: "red" },
   TECH_NO_EMPLOYER: { label: "Technical, no employer", short: "No employer", sev: "amber" },
-  NO_MD_USER_MATCH: { label: "No MotherDuck user match", short: "No MD user", sev: "amber" },
+  BUSINESS_EMAIL: { label: "Business email, not enriched", short: "Business email", sev: "none" },
   WORKABLE: { label: "Workable", short: "Workable", sev: "none" },
   PENDING: { label: "Not scored yet", short: "Pending", sev: "pending" },
 };
-const WK_ORDER = ["AGENT_OR_RELAY_EMAIL", "JOINED_EXISTING_ORG", "NEW_TEAM_AT_PAYING_CUSTOMER", "NON_TECHNICAL", "INSUFFICIENT_INFO", "TECH_NO_EMPLOYER", "NO_MD_USER_MATCH", "WORKABLE", "PENDING"];
-const ROLE_OPTS: [string, string][] = [["icp", "Data / software (ICP)"], ["tech_at_company", "Technical, at a company"], ["tech_no_company", "Technical, no employer"],
-  ["non_technical", "Non-technical"], ["unknown", "Not enough info"]];
+const WK_ORDER = ["AGENT_OR_RELAY_EMAIL", "JOINED_EXISTING_ORG", "NEW_TEAM_AT_PAYING_CUSTOMER", "UNWORKABLE_TITLE", "NON_TECHNICAL", "INSUFFICIENT_INFO", "TECH_NO_EMPLOYER", "BUSINESS_EMAIL", "WORKABLE", "PENDING"];
+// Factors a viewer can choose to disqualify on (All Leads "Disqualify by" and Inbound "Unworkability"). Default: every red reason.
+const DQ_FACTORS = WK_ORDER.filter((k) => k !== "WORKABLE" && k !== "PENDING");
+const DQ_DEFAULT = DQ_FACTORS.filter((k) => WK_REASONS[k].sev === "red");
+const dqOpts = (): DOpt[] => DQ_FACTORS.map((k) => ({ v: k, label: WK_REASONS[k].label, color: wkColor(WK_REASONS[k].sev) }));
+const isDq = (w: Wk | undefined, dq: string[]) => !!w && dq.includes(w.reason);
+const ROLE_OPTS: [string, string][] = [["icp", "Data / software (ICP)"], ["tech_at_company", "Technical, at a company"], ["business_decision_maker", "Business decision maker"],
+  ["non_technical", "Non-technical, not a decision maker"], ["unworkable_title", "Unworkable title"], ["tech_no_company", "Technical, no employer"], ["unknown", "Not enough info"]];
 const ROLE_SET = new Set(ROLE_OPTS.map((o) => o[0]));
 const roleLabel = (v: string) => optLabel(ROLE_OPTS, v);
-const WORK_OPTS: [string, string][] = [["any", "any"], ["workable", "workable (incl. amber)"], ["unworkable", "unworkable (red)"]];
-const wkMatches = (f: string, w?: Wk) => f === "any" || (f === "workable" ? !!w && (w.sev === "none" || w.sev === "amber") : f === "unworkable" ? !!w && w.sev === "red" : true);
 const wkColor = (sev: WkSev) => (sev === "red" ? C.danger : sev === "amber" ? C.warn : sev === "none" ? C.ok : C.faint);
-function wkReason(w: Pick<Wk, "scored" | "is_relay" | "is_org_creator" | "sibling_paying" | "role" | "has_md_user">) {
+// A MotherDuck account is not required: event, content and form leads are workable too.
+function wkReason(w: Pick<Wk, "scored" | "is_relay" | "is_org_creator" | "sibling_paying" | "role" | "is_business">) {
   if (!w.scored) return "PENDING";
   if (w.is_relay) return "AGENT_OR_RELAY_EMAIL";
   if (w.is_org_creator === false) return "JOINED_EXISTING_ORG";
   if (w.sibling_paying) return "NEW_TEAM_AT_PAYING_CUSTOMER";
   if (!w.role) return "PENDING";
+  if (w.role === "unworkable_title") return "UNWORKABLE_TITLE";
   if (w.role === "non_technical") return "NON_TECHNICAL";
-  if (w.role === "unknown") return "INSUFFICIENT_INFO";
+  if (w.role === "unknown") return w.is_business ? "BUSINESS_EMAIL" : "INSUFFICIENT_INFO";
   if (w.role === "tech_no_company") return "TECH_NO_EMPLOYER";
-  if (!w.has_md_user) return "NO_MD_USER_MATCH";
   return "WORKABLE";
 }
 function wkEvidence(w: Wk, title: string, company: string) {
@@ -615,7 +616,7 @@ function wkEvidence(w: Wk, title: string, company: string) {
     case "AGENT_OR_RELAY_EMAIL": return `Email on ${w.domain} (relay or agent inbox domain)`;
     case "JOINED_EXISTING_ORG": return `Joined ${w.org_name || "an existing org"} (${w.org_users} users, ${w.org_awr > 0 ? `${fmtUsd(w.org_awr)} AWR` : "free org"})`;
     case "NEW_TEAM_AT_PAYING_CUSTOMER": return `New org, but ${w.sibling_org_name || "another org"} on ${w.domain} pays ${fmtUsd(w.sibling_awr)} AWR`;
-    case "NO_MD_USER_MATCH": return `${who}, no MotherDuck user with this email`;
+    case "BUSINESS_EMAIL": return `${who} (business email, not enriched yet)`;
     case "PENDING": return "Not scored yet. The scoring Flight runs every hour.";
     default: return who;
   }
@@ -631,7 +632,7 @@ function withRole(base: Wk, override: string, title: string, company: string): W
 function toWk(r: any): Wk {
   const base: Wk = {
     scored: B(r.wk_scored), reason: "", sev: "pending", evidence: "", role: "", model_role: S(r.role_label), conf: r.role_confidence == null ? null : N(r.role_confidence), override: "",
-    is_relay: B(r.is_relay), has_md_user: B(r.has_md_user), is_org_creator: r.is_org_creator == null ? null : B(r.is_org_creator), sibling_paying: B(r.sibling_paying),
+    is_relay: B(r.is_relay), is_business: B(r.is_business_domain), has_md_user: B(r.has_md_user), is_org_creator: r.is_org_creator == null ? null : B(r.is_org_creator), sibling_paying: B(r.sibling_paying),
     sibling_org_name: S(r.sibling_org_name), sibling_awr: N(r.sibling_awr), domain: S(r.email_domain), li_found: B(r.li_found),
     agent_harness: B(r.agent_harness), batch_signup: B(r.batch_signup), batch_size: N(r.batch_size), company_on_md: B(r.company_on_md), company_on_md_org: S(r.company_on_md_org),
     org_name: S(r.org_name), org_users: N(r.org_users), org_awr: N(r.org_awr), facts_at: T(S(r.facts_at)),
@@ -649,7 +650,7 @@ const wkTitle = (w: Wk) => [
   ...wkTags(w).map((t) => `Tag: ${t.label}`),
 ].filter(Boolean).join("\n");
 // Shared column list for both tabs. Needs aliases w (lead_workability) and o (latest override).
-const WK_COLS = `w.contact_id IS NOT NULL AS wk_scored, w.role_label, w.role_confidence, o.lbl AS role_override, w.is_relay, w.has_md_user, w.is_org_creator,
+const WK_COLS = `w.contact_id IS NOT NULL AS wk_scored, w.role_label, w.role_confidence, o.lbl AS role_override, w.is_relay, w.is_business_domain, w.has_md_user, w.is_org_creator,
   w.sibling_paying, w.sibling_org_name, w.sibling_awr, w.email_domain, w.li_found, w.agent_harness, w.batch_signup, w.batch_size, w.company_on_md, w.company_on_md_org,
   w.org_name, w.org_users, w.org_awr, strftime(w.facts_at, '%Y-%m-%dT%H:%M:%S') AS facts_at`;
 const WK_OVR = `(SELECT contact_id, arg_max(note, event_ts) AS lbl FROM "bdr_terminal_gamified"."main"."touch_events" WHERE event_type = 'role_override' AND contact_id IS NOT NULL GROUP BY 1)`;
@@ -3984,7 +3985,10 @@ function SignalFeed() {
   const [touchedBy, setTouchedBy] = useDiveState<string>("touchedBy", "any");
   const [ctOwner, setCtOwner] = useDiveState<string>("ctOwner", "any");
   const [liF, setLiF] = useDiveState<string>("liF", "any");
-  const [workF, setWorkF] = useDiveState<string>("workF", "any");
+  // Unworkability: reasons checked here are removed from the feed. "dqReasons" is the All Leads tab's selection.
+  const [dqInbound, setDqInbound] = useDiveState<string[]>("dqInbound", []);
+  const [dqLeads] = useDiveState<string[]>("dqReasons", DQ_DEFAULT);
+  const dqIn = Array.isArray(dqInbound) ? dqInbound : [];
   const [fresh, setFresh] = useDiveState<string>("fresh", "any");
   const [createdWin, setCreatedWin] = useDiveState<string>("created", "any");
   const [hasLi, setHasLi] = useDiveState<boolean>("hasLi", false);
@@ -4128,7 +4132,7 @@ function SignalFeed() {
     }),
     pages: (v: string[]) => (v.length ? (r) => v.some((p) => r.page_cats.includes(p)) : null),
     liF: (v: string) => (v === "any" ? null : (r) => liMatches(v, liInfo(r.ov, r.hs_li))),
-    workF: (v: string) => (v === "any" ? null : (r) => wkMatches(v, r.wk)),
+    dq: (v: string[]) => (v.length ? (r) => !isDq(r.wk, v) : null),
     ctOwner: (v: string) => (v === "any" ? null : (r) => (v === "same" ? r.owner_id === r.queue_owner_id : v === "other" ? r.owner_id !== r.queue_owner_id : r.owner_id === v)),
     touchedBy: (v: string) => (v === "any" ? null : (r) => {
       const id = r.last_by_id;
@@ -4150,7 +4154,7 @@ function SignalFeed() {
     created: (v: string) => (v === "any" ? null : (r) => { const d = daysSince(r.created); return d != null && d <= Number(v); }),
     search: (v: string) => (v ? (r) => [r.contact_name, r.email, r.company, r.ae_name, r.last_by, r.org_name].some((x) => (x || "").toLowerCase().includes(v)) : null),
   }), [acting]);
-  const fstate: Record<string, any> = { sigs: sigSel, stage, plan, hasLi, opened, pages: Array.isArray(pages) ? pages : [], liF, workF, ctOwner, touchedBy, fresh, created: createdWin, search: needle };
+  const fstate: Record<string, any> = { sigs: sigSel, stage, plan, hasLi, opened, pages: Array.isArray(pages) ? pages : [], liF, dq: dqIn, ctOwner, touchedBy, fresh, created: createdWin, search: needle };
   const fkey = JSON.stringify(fstate);
   const preds = useMemo(() => Object.entries(fstate).map(([k, v]) => [k, FX[k](v)] as [string, ((r: Row) => boolean) | null]).filter(([, p]) => p) as [string, (r: Row) => boolean][], [fkey, FX]);
   const passExcept = (r: Row, except: string) => preds.every(([k, p]) => k === except || p(r));
@@ -4222,7 +4226,7 @@ function SignalFeed() {
     const list = [...m.entries()].sort((a, b) => b[1].n - a[1].n).map(([id, e]) => ({ v: id, label: e.name }));
     return [{ v: "any", label: "anyone" }, { v: "same", label: "same as BDR owner" }, { v: "other", label: "someone else" }, ...list];
   }, [scoped]);
-  const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setLiF("any"); setWorkF("any"); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
+  const resetFilters = () => { setSigSel([]); setStage("any"); setPlan("any"); setTouchedBy("any"); setCtOwner("any"); setLiF("any"); setDqInbound([]); setFresh("any"); setCreatedWin("any"); setHasLi(false); setSearch(""); setOpened("any"); setPages([]); };
   // filters living under "All filters" (for its badge) and the removable pills
   const moreActive = (stage !== "any" ? 1 : 0) + (plan !== "any" ? 1 : 0) + (touchedBy !== "any" ? 1 : 0) + (ctOwner !== "any" ? 1 : 0) + (liF !== "any" ? 1 : 0) +
     (fresh !== "any" ? 1 : 0) + (createdWin !== "any" ? 1 : 0) + (hasLi ? 1 : 0) + (opened !== "any" ? 1 : 0) + (Array.isArray(pages) && pages.length ? 1 : 0) + (showPost ? 1 : 0);
@@ -4231,7 +4235,7 @@ function SignalFeed() {
     ...sigSel.map((k) => ({ k: "s:" + k, label: k, color: CHIPS.find((c) => c[0] === k)?.[1], onRemove: () => setSigSel(sigSel.filter((x) => x !== k)) })),
     ...(ctOwner !== "any" ? [{ k: "co", label: `Contact owner: ${ctOwnerOptions.find((o) => o.v === ctOwner)?.label ?? ctOwner}`, onRemove: () => setCtOwner("any") }] : []),
     ...(liF !== "any" ? [{ k: "li", label: `LinkedIn: ${optLabel(LI_FILTER_OPTS, liF)}`, onRemove: () => setLiF("any") }] : []),
-    ...(workF !== "any" ? [{ k: "wk", label: `Workability: ${optLabel(WORK_OPTS, workF)}`, onRemove: () => setWorkF("any") }] : []),
+    ...dqIn.map((k) => ({ k: "dq:" + k, label: `Removed: ${WK_REASONS[k]?.label ?? k}`, color: wkColor(WK_REASONS[k]?.sev ?? "pending"), onRemove: () => setDqInbound(dqIn.filter((x) => x !== k)) })),
     ...(touchedBy !== "any" ? [{ k: "tb", label: `Last touch by: ${optLabel(TOUCHED_OPTS, touchedBy)}`, onRemove: () => setTouchedBy("any") }] : []),
     ...(fresh !== "any" ? [{ k: "fr", label: `Freshness: ${optLabel(FRESH_OPTS, fresh)}`, onRemove: () => setFresh("any") }] : []),
     ...(opened !== "any" ? [{ k: "op", label: `Email opened: ${optLabel(OPENED_OPTS, opened)}`, onRemove: () => setOpened("any") }] : []),
@@ -4315,8 +4319,12 @@ function SignalFeed() {
             counts={() => { const m: Record<string, number> = Object.fromEntries(BUCKETS.map((b) => [b.id, 0])); const base = scoped.filter((r) => passExcept(r, "")); m.all = base.length; for (const r of base) m[r.bucket] = (m[r.bucket] ?? 0) + 1; return m; }} />
           <Dropdown label="Signals" multi options={CHIPS.map(([k, c]) => ({ v: k, label: k, color: c }))} values={sigSel} onChangeMulti={setSigSel}
             counts={() => countsFor("sigs", CHIPS.map(([k]) => k))} />
-          <Dropdown label="Workability" options={toOpts(WORK_OPTS)} value={workF} onChange={setWorkF} isDefault={workF === "any"} menuWidth={240}
-            counts={() => countsFor("workF", WORK_OPTS.map((o) => o[0]))} />
+          <Dropdown label="Unworkability" multi menuWidth={320}
+            options={[{ v: "__leads", label: `Same as All Leads (${(Array.isArray(dqLeads) ? dqLeads : []).length})`, hint: "Remove every factor chosen under Disqualify by on the All Leads tab" }, ...dqOpts()]}
+            values={dqIn} display={dqIn.length ? `${dqIn.length} removed` : "none removed"}
+            onChangeMulti={(v) => setDqInbound(v.includes("__leads") ? [...(Array.isArray(dqLeads) ? dqLeads : DQ_DEFAULT)] : v.filter((x) => DQ_FACTORS.includes(x)))}
+            onOnly={(v) => setDqInbound(v === "__leads" ? [...(Array.isArray(dqLeads) ? dqLeads : DQ_DEFAULT)] : [v])}
+            counts={() => { const m: Record<string, number> = {}; const base = inBucket.filter((r) => passExcept(r, "dq")); for (const r of base) if (r.wk) m[r.wk.reason] = (m[r.wk.reason] ?? 0) + 1; m.__leads = base.filter((r) => isDq(r.wk, Array.isArray(dqLeads) ? dqLeads : [])).length; return m; }} />
           <Dropdown label="Sort" options={toOpts(SORT_OPTS)} value={sortBy} onChange={setSortBy} isDefault={sortBy === "priority"} menuWidth={240} />
           <button type="button" onClick={() => setSortDir(sortDir === "asc" ? "desc" : "asc")} title="Flip sort direction" aria-label={`Sort ${sortDir === "asc" ? "ascending" : "descending"}`}
             style={{ ...ctl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4 }}><ArrowUpDown size={14} /> {sortDir}</button>
@@ -4379,7 +4387,7 @@ function SignalFeed() {
         <div>Last touch = latest email/call/meeting by anyone (BDR, AE, CE) + LinkedIn logged here.</div>
         <div>HubSpot syncs ~every 4h, usage/AWR nightly.</div>
         <div>Actions apply instantly and save in batches via the bdr_terminal_log_action Flight (MotherDuck only, never HubSpot); only the queue owner can write.</div>
-        <div>Workability = the lead_workability table, rescored hourly by the bdr_lead_workability Flight (red = not a BDR lead, amber = worth a look, dashed = not scored yet). Hover a badge for the evidence. See the All Leads tab for the rules.</div>
+        <div>Workability badges come from the lead_workability table, rescored hourly by the bdr_lead_workability Flight (red = not a BDR lead, amber = worth a look, dashed = not scored yet). Hover a badge for the evidence. Unworkability removes the reasons you check; "Same as All Leads" copies that tab's Disqualify by selection.</div>
         <div>Post-SQA = the contact or its company has an SQA (BDR Terminal rules) that is open, won, or lost in the last 180 days; older closed-lost SQAs recycle back into the queue.</div>
       </div>
       </Expander>
@@ -4392,14 +4400,14 @@ function SignalFeed() {
 // Dashboard's MQL+ count). Inbound = same split as the rest of the dive (no Apollo contacts, no Outbound-source deals), plus
 // calc_first_conversion <> 'Outbound / Prospecting'.
 const LEAD_RANGES: [string, string][] = [["today", "today (UTC)"], ["7d", "last 7 days"], ["14d", "last 14 days"], ["30d", "last 30 days"], ["fq", "this fiscal quarter"], ["custom", "custom range"]];
-const DT_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+const DT_RE = /^\d{4}-\d{2}-\d{2}$/; // calendar dates (UTC)
 const NOW_UTC = "(now() AT TIME ZONE 'UTC')";
 function leadRangeSql(preset: string, start: string, end: string): { from: string; to: string; ok: boolean } {
   if (preset === "today") return { from: `date_trunc('day', ${NOW_UTC})`, to: `${NOW_UTC} + INTERVAL 1 DAY`, ok: true };
   if (preset === "7d" || preset === "14d" || preset === "30d") return { from: `${NOW_UTC} - INTERVAL ${parseInt(preset, 10)} DAY`, to: `${NOW_UTC} + INTERVAL 1 DAY`, ok: true };
   if (preset === "fq") { const q = currentQuarter(); return { from: `TIMESTAMP '${q.start} 00:00:00'`, to: `TIMESTAMP '${q.end} 00:00:00' + INTERVAL 1 DAY`, ok: true }; }
-  const ok = DT_RE.test(start) && DT_RE.test(end) && start < end; // validated before it reaches SQL
-  return ok ? { from: `TIMESTAMP '${start.replace("T", " ")}:00'`, to: `TIMESTAMP '${end.replace("T", " ")}:00'`, ok } : { from: "", to: "", ok: false };
+  const ok = DT_RE.test(start) && DT_RE.test(end) && start <= end; // validated before it reaches SQL; end date is inclusive
+  return ok ? { from: `TIMESTAMP '${start} 00:00:00'`, to: `TIMESTAMP '${end} 00:00:00' + INTERVAL 1 DAY`, ok } : { from: "", to: "", ok: false };
 }
 function allLeadsSql(from: string, to: string) {
   // filter the leads first (materialized), then join: joining before filtering took ~12s, this takes well under a second
@@ -4435,21 +4443,17 @@ ORDER BY c.created DESC
 LIMIT 20000`;
 }
 type LeadRow = { contact_id: string; name: string; email: string; title: string; company: string; source: string; linkedin_url: string; owner_id: string; owner_name: string; created: number | null; base: Wk; wk: Wk };
-const fmtUtc = (t: number | null) => (t == null ? "—" : new Date(t).toISOString().slice(0, 16).replace("T", " ") + " UTC");
-const fmtLocal = (t: number | null) => (t == null ? "" : new Date(t).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }));
+const fmtCreated = (t: number | null) => (t == null ? "—" : new Date(t).toISOString().slice(0, 10));
 const weekStart = (t: number) => { const d = new Date(t); const k = (d.getUTCDay() + 6) % 7; d.setUTCHours(0, 0, 0, 0); d.setUTCDate(d.getUTCDate() - k); return d.toISOString().slice(0, 10); };
-// datetime-local inputs hold UTC here; this shows the same moment in the viewer's zone
-const utcInputToLocal = (v: string) => (DT_RE.test(v) ? fmtLocal(Date.parse(v + ":00Z")) : "");
-const isoMinusDays = (d: number) => new Date(Date.now() - d * 864e5).toISOString().slice(0, 16);
+const isoMinusDays = (d: number) => new Date(Date.now() - d * 864e5).toISOString().slice(0, 10);
 
-const LeadRowView = memo(function LeadRowView({ r, open, highlight, canEdit, onToggle, onOverride }:
-  { r: LeadRow; open: boolean; highlight: boolean; canEdit: boolean; onToggle: (id: string) => void; onOverride: (r: LeadRow, label: string) => void }) {
+// dq = this lead matches a chosen Disqualify by factor (highlighted red when unworkable leads are shown)
+const LeadRowView = memo(function LeadRowView({ r, open, dq, canEdit, onToggle, onOverride }:
+  { r: LeadRow; open: boolean; dq: boolean; canEdit: boolean; onToggle: (id: string) => void; onOverride: (r: LeadRow, label: string) => void }) {
   const w = r.wk;
-  const col = wkColor(w.sev);
-  const red = highlight && w.sev === "red";
   const g = UI.game;
   return (
-    <div style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `4px solid ${highlight && (w.sev === "red" || w.sev === "amber") ? col : "transparent"}`, background: red ? `${C.danger}0d` : undefined }}>
+    <div style={{ borderBottom: `1px solid ${C.border}`, borderLeft: `4px solid ${dq ? C.danger : "transparent"}`, background: dq ? `${C.danger}0d` : undefined }}>
       <div className="bdr-lw-row bdr-row" role="button" tabIndex={0} aria-expanded={open} onClick={() => onToggle(r.contact_id)}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(r.contact_id); } }}
         style={{ padding: g ? "10px 12px" : "7px 10px", cursor: "pointer" }}>
@@ -4459,10 +4463,8 @@ const LeadRowView = memo(function LeadRowView({ r, open, highlight, canEdit, onT
             {[r.title, r.company].filter(Boolean).join(" @ ") || "no title, no company"} · {w.domain || r.email.split("@")[1] || ""}
           </div>
         </div>
-        <div style={{ fontSize: fs(g ? 12 : 10.5), minWidth: 0 }} title={`${fmtUtc(r.created)}\n${fmtLocal(r.created)} (your time)`}>
-          <div style={{ fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }}>{fmtUtc(r.created)}</div>
-          <div style={{ color: C.faint, whiteSpace: "nowrap" }}>{fmtLocal(r.created)}</div>
-        </div>
+        <div style={{ fontSize: fs(g ? 12 : 10.5), minWidth: 0, fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" }} title="Created (UTC date)">{fmtCreated(r.created)}</div>
+        <div style={{ fontSize: fs(g ? 12 : 10.5), minWidth: 0, color: C.muted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={r.source || "unknown source"}>{r.source || "—"}</div>
         <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}>
           <WorkBadge w={w} showOk />
           <span style={{ fontSize: fs(g ? 11.5 : 10), color: C.faint, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "100%" }} title={wkTitle(w)}>{w.evidence}</span>
@@ -4496,6 +4498,48 @@ const LeadRowView = memo(function LeadRowView({ r, open, highlight, canEdit, onT
   );
 });
 
+// Waffle grid: 200 squares (each 0.5% of the leads in view). One muted color per disqualifying reason, white = still workable.
+const DQ_TINT: Record<string, string> = {
+  AGENT_OR_RELAY_EMAIL: "#b9a6cc", JOINED_EXISTING_ORG: "#9fb6d3", NEW_TEAM_AT_PAYING_CUSTOMER: "#a6c8b6", UNWORKABLE_TITLE: "#d6aaa4",
+  NON_TECHNICAL: "#dfc39e", INSUFFICIENT_INFO: "#c3bfb5", TECH_NO_EMPLOYER: "#d6cf9c", BUSINESS_EMAIL: "#a8ccd3",
+};
+const WAFFLE_CELLS = 200;
+function DqWaffle({ parts, total }: { parts: { k: string; label: string; n: number; color: string; dashed?: boolean }[]; total: number }) {
+  if (!total) return null;
+  // largest-remainder rounding so the squares always add up to exactly 200
+  const raw = parts.map((p) => (p.n / total) * WAFFLE_CELLS);
+  const cells = raw.map(Math.floor);
+  let left = WAFFLE_CELLS - cells.reduce((a, b) => a + b, 0);
+  raw.map((r, i) => [r - Math.floor(r), i] as [number, number]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (left > 0) { cells[i]++; left--; } });
+  const squares: { p: (typeof parts)[number] }[] = [];
+  parts.forEach((p, i) => { for (let c = 0; c < cells[i]; c++) squares.push({ p }); });
+  const pct = (n: number) => `${((n / total) * 100).toFixed(n / total < 0.1 ? 1 : 0)}%`;
+  const taken = parts.filter((p) => p.k !== "__ok" && p.k !== "__pending").reduce((a, p) => a + p.n, 0);
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: SP.sm, flexWrap: "wrap" }}>
+        <div style={SECTION_TITLE()}>{UI.game ? "" : "// "}Leads taken out (each square = 0.5%)</div>
+        <div style={{ fontSize: fs(12.5), color: C.muted }}><b style={{ color: C.text }}>{pct(taken)}</b> taken out · {taken} of {total}</div>
+      </div>
+      <div role="img" aria-label={parts.map((p) => `${p.label} ${pct(p.n)}`).join(", ")}
+        style={{ display: "grid", gridTemplateColumns: "repeat(25, minmax(0, 1fr))", gap: 3, marginTop: SP.sm, padding: 6, borderRadius: UI.radius2, background: C.surfaceAlt, border: `1px solid ${C.border}` }}>
+        {squares.map((q, i) => (
+          <div key={i} title={`${q.p.label}: ${pct(q.p.n)} (${q.p.n})`}
+            style={{ aspectRatio: "1 / 1", borderRadius: 3, background: q.p.color, border: q.p.dashed ? `1px dashed ${C.border}` : "1px solid rgba(0,0,0,.06)" }} />
+        ))}
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: `${SP.xs}px ${SP.md}px`, marginTop: SP.sm, fontSize: fs(12), color: C.muted }}>
+        {parts.filter((p) => p.n > 0).map((p) => (
+          <span key={p.k} style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}>
+            <span style={{ width: 11, height: 11, borderRadius: 3, background: p.color, border: p.dashed ? `1px dashed ${C.border}` : "1px solid rgba(0,0,0,.12)" }} />
+            {p.label} <b style={{ color: C.text, fontVariantNumeric: "tabular-nums" }}>{pct(p.n)}</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function AllLeadsTab() {
   const [acting] = useDiveState<string>("acting", "89400804");
   const [preset, setPreset] = useDiveState<string>("leadsRange", "14d");
@@ -4503,6 +4547,8 @@ function AllLeadsTab() {
   const [end, setEnd] = useDiveState<string>("leadsEnd", "");
   const [showUnwork, setShowUnwork] = useDiveState<boolean>("leadsShowUnworkable", true); // checked = highlight, unchecked = hide
   const [reasonF, setReasonF] = useDiveState<string>("leadsReason", "any");
+  const [dqRaw, setDq] = useDiveState<string[]>("dqReasons", DQ_DEFAULT); // the factors that disqualify a lead (shared with Inbound's "Same as All Leads")
+  const dq = Array.isArray(dqRaw) ? dqRaw : DQ_DEFAULT;
   const [search, setSearch] = useDiveState<string>("leadsQ", "");
   const [shown, setShown] = useState(50);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -4523,27 +4569,30 @@ function AllLeadsTab() {
   const needle = search.trim().toLowerCase();
   const searched = useMemo(() => (needle ? live.filter((r) => [r.name, r.email, r.company, r.title, r.wk.org_name].some((v) => (v || "").toLowerCase().includes(needle))) : live), [live, needle]);
   const byReason = useMemo(() => { const m: Record<string, number> = {}; for (const r of searched) m[r.wk.reason] = (m[r.wk.reason] ?? 0) + 1; return m; }, [searched]);
-  const visible = useMemo(() => searched.filter((r) => (reasonF === "any" || r.wk.reason === reasonF) && (showUnwork || r.wk.sev !== "red")), [searched, reasonF, showUnwork]);
-  const hiddenN = showUnwork ? 0 : searched.filter((r) => (reasonF === "any" || r.wk.reason === reasonF) && r.wk.sev === "red").length;
-  useEffect(() => { setShown(50); }, [sql, reasonF, showUnwork, needle]);
+  const dqKey = dq.join(",");
+  const visible = useMemo(() => searched.filter((r) => (reasonF === "any" || r.wk.reason === reasonF) && (showUnwork || !isDq(r.wk, dq))), [searched, reasonF, showUnwork, dqKey]);
+  const hiddenN = showUnwork ? 0 : searched.filter((r) => (reasonF === "any" || r.wk.reason === reasonF) && isDq(r.wk, dq)).length;
+  useEffect(() => { setShown(50); }, [sql, reasonF, showUnwork, needle, dqKey]);
 
   const n = searched.length;
-  const cnt = (sev: WkSev) => searched.filter((r) => r.wk.sev === sev).length;
-  const nRed = cnt("red"), nAmber = cnt("amber"), nOk = cnt("none"), nPend = cnt("pending");
+  const nPend = searched.filter((r) => r.wk.sev === "pending").length;
+  const nRed = searched.filter((r) => isDq(r.wk, dq)).length;
+  const nOk = n - nRed - nPend;
+  const nBiz = byReason.BUSINESS_EMAIL ?? 0;
   const pct = (k: number, of = n) => (of ? `${Math.round((k / of) * 100)}%` : "—");
   const liFound = searched.filter((r) => r.wk.scored && r.wk.li_found).length;
   const lastScored = Math.max(0, ...rows.map((r) => r.wk.facts_at ?? 0)) || null;
   const weekly = useMemo(() => {
-    const m = new Map<string, { week: string; workable: number; worth: number; unworkable: number; pending: number }>();
+    const m = new Map<string, { week: string; workable: number; unworkable: number; pending: number }>();
     for (const r of searched) {
       if (r.created == null) continue;
       const k = weekStart(r.created);
-      const e = m.get(k) ?? { week: k, workable: 0, worth: 0, unworkable: 0, pending: 0 };
-      if (r.wk.sev === "none") e.workable++; else if (r.wk.sev === "amber") e.worth++; else if (r.wk.sev === "red") e.unworkable++; else e.pending++;
+      const e = m.get(k) ?? { week: k, workable: 0, unworkable: 0, pending: 0 };
+      if (r.wk.sev === "pending") e.pending++; else if (isDq(r.wk, dq)) e.unworkable++; else e.workable++;
       m.set(k, e);
     }
     return [...m.values()].sort((a, b) => a.week.localeCompare(b.week)).map((e) => ({ ...e, label: e.week.slice(5) }));
-  }, [searched]);
+  }, [searched, dqKey]);
 
   const onToggle = useCallback((id: string) => setOpenId((o) => (o === id ? null : id)), []);
   const api = useRef({ aq, acting });
@@ -4555,7 +4604,7 @@ function AllLeadsTab() {
   }, []);
 
   const rangeText = preset === "custom"
-    ? (rng.ok ? `${start.replace("T", " ")} → ${end.replace("T", " ")} UTC` : "pick a start and end (UTC)")
+    ? (rng.ok ? `${start} → ${end} (UTC dates)` : "pick a start and end date")
     : preset === "fq" ? `${currentQuarter().label}: ${currentQuarter().start} → ${currentQuarter().end} UTC` : optLabel(LEAD_RANGES, preset);
   const loading = !!sql && q.isLoading && rows.length === 0;
   const g = UI.game;
@@ -4587,9 +4636,11 @@ function AllLeadsTab() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: SP.sm, alignItems: "center" }}>
           <SearchBox value={search} onChange={setSearch} placeholder="Name, email, company, org" />
           <Dropdown label="Created" options={toOpts(LEAD_RANGES)} value={preset} isDefault={preset === "14d"} menuWidth={240}
-            onChange={(v) => { if (v === "custom" && !(DT_RE.test(start) && DT_RE.test(end))) { setStart(isoMinusDays(14)); setEnd(new Date().toISOString().slice(0, 16)); } setPreset(v); }} />
-          <Dropdown label="Reason" options={[{ v: "any", label: "any" }, ...WK_ORDER.map((k) => ({ v: k, label: WK_REASONS[k].label, color: wkColor(WK_REASONS[k].sev) }))]} value={reasonF}
-            onChange={setReasonF} isDefault={reasonF === "any"} menuWidth={280} counts={() => ({ any: n, ...byReason })} />
+            onChange={(v) => { if (v === "custom" && !(DT_RE.test(start) && DT_RE.test(end))) { setStart(isoMinusDays(14)); setEnd(isoMinusDays(0)); } setPreset(v); }} />
+          <Dropdown label="Disqualify by" multi options={dqOpts()} values={dq} onChangeMulti={setDq} onOnly={(v) => setDq([v])} menuWidth={320}
+            isDefault={dqKey === DQ_DEFAULT.join(",")} display={dqKey === DQ_DEFAULT.join(",") ? "default (red)" : dq.length ? `${dq.length} factors` : "nothing"}
+            counts={() => byReason} />
+          {dqKey !== DQ_DEFAULT.join(",") && <button type="button" onClick={() => setDq(DQ_DEFAULT)} style={{ ...ctl, cursor: "pointer", color: C.faint }}>Reset factors</button>}
           <label style={{ ...ctl, display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer" }} title="Checked: unworkable leads stay in the list, highlighted red. Unchecked: they're hidden.">
             <input type="checkbox" checked={showUnwork} onChange={(e) => setShowUnwork(e.target.checked)} style={{ width: 16, height: 16, margin: 0 }} />
             Show unworkable <span style={{ color: C.faint }}>({showUnwork ? "highlighted" : "hidden"})</span>
@@ -4602,13 +4653,12 @@ function AllLeadsTab() {
         </div>
         {preset === "custom" && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: SP.md, alignItems: "center", fontSize: fs(12), color: C.muted }}>
-            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>From (UTC)
-              <input type="datetime-local" value={start} onChange={(e) => setStart(e.target.value)} style={{ ...ctl }} /></label>
-            <span style={{ color: C.faint }}>{utcInputToLocal(start)}</span>
-            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>To (UTC)
-              <input type="datetime-local" value={end} onChange={(e) => setEnd(e.target.value)} style={{ ...ctl }} /></label>
-            <span style={{ color: C.faint }}>{utcInputToLocal(end)}</span>
-            {!rng.ok && <span style={{ color: C.danger }}>Start must be before end.</span>}
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>From
+              <input type="date" value={start} onChange={(e) => setStart(e.target.value)} style={{ ...ctl }} /></label>
+            <label style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>To
+              <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} style={{ ...ctl }} /></label>
+            <span style={{ color: C.faint }}>UTC calendar dates, both days included</span>
+            {!rng.ok && <span style={{ color: C.danger }}>Start must be on or before end.</span>}
           </div>
         )}
       </div>
@@ -4620,12 +4670,19 @@ function AllLeadsTab() {
             <div className="bdr-stats" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: SP.lg }}>
               <Stat label="Leads" value={String(n)} sub={nPend ? `${nPend} not scored yet` : "all scored"} />
               <Stat label="Workable" value={pct(nOk)} tone={C.ok} sub={`${nOk} leads`} />
-              <Stat label="Worth a look" value={pct(nAmber)} tone={C.warn} sub={`${nAmber} amber`} />
-              <Stat label="Unworkable" value={pct(nRed)} tone={C.danger} sub={`${nRed} red`} />
+              <Stat label="Unworkable" value={pct(nRed)} tone={C.danger} sub={`${nRed} match Disqualify by`} />
+              <Stat label="Business email" value={String(nBiz)} sub="not enriched, kept workable" />
               <Stat label="LinkedIn found" value={pct(liFound, n - nPend)} sub="of scored leads" />
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: SP.xs + 2, marginTop: SP.lg }}>
               {WK_ORDER.filter((k) => byReason[k]).map((k) => chip(k, WK_REASONS[k].label, byReason[k], wkColor(WK_REASONS[k].sev)))}
+            </div>
+            <div style={{ marginTop: SP.lg }}>
+              <DqWaffle total={n} parts={[
+                ...DQ_FACTORS.filter((k) => dq.includes(k)).map((k) => ({ k, label: WK_REASONS[k].label, n: byReason[k] ?? 0, color: DQ_TINT[k] })),
+                { k: "__ok", label: "Still workable", n: nOk, color: C.surface },
+                { k: "__pending", label: "Not scored yet", n: nPend, color: "transparent", dashed: true },
+              ]} />
             </div>
             {weekly.length > 1 && (
               <div style={{ marginTop: SP.lg }}>
@@ -4638,7 +4695,6 @@ function AllLeadsTab() {
                       <YAxis fontSize={11} tick={{ fill: C.faint }} tickLine={false} axisLine={false} allowDecimals={false} />
                       <Tooltip contentStyle={{ background: C.surface, border: `1px solid ${C.border}`, fontSize: 12 }} labelFormatter={(l) => `Week of ${l}`} />
                       <RBar dataKey="workable" name="Workable" stackId="a" fill={C.ok} isAnimationActive={false} />
-                      <RBar dataKey="worth" name="Worth a look" stackId="a" fill={C.warn} isAnimationActive={false} />
                       <RBar dataKey="unworkable" name="Unworkable" stackId="a" fill={C.danger} isAnimationActive={false} />
                       <RBar dataKey="pending" name="Not scored" stackId="a" fill={C.border} isAnimationActive={false} />
                     </BarChart>
@@ -4655,16 +4711,16 @@ function AllLeadsTab() {
       ) : (
         <div style={{ ...PANEL(), overflow: "hidden" }}>
           <div className="bdr-lw-row bdr-lw-head" style={{ padding: g ? "8px 12px 8px 16px" : "6px 10px 6px 14px", borderBottom: `1px solid ${C.border}`, fontSize: fs(11), color: C.faint, textTransform: "uppercase", letterSpacing: 0.6 }}>
-            <span>Lead</span><span>Created (UTC / yours)</span><span>Reason</span><span>Role</span><span />
+            <span>Lead</span><span>Created (UTC)</span><span>Lead source</span><span>Reason</span><span>Role</span><span />
           </div>
-          {!rng.ok ? <EmptyMon bdr={acting} ob={false} title="Pick a range">Choose a start and end time (UTC) for the custom range.</EmptyMon>
+          {!rng.ok ? <EmptyMon bdr={acting} ob={false} title="Pick a range">Choose a start and end date for the custom range.</EmptyMon>
             : loading ? <LoadingMon bdr={acting} ob={false} label="Counting every lead in the tall grass" />
             : visible.length === 0 ? (
               <EmptyMon bdr={acting} ob={false} title="No leads here">
                 {hiddenN ? <>All {hiddenN} are unworkable and hidden. <button type="button" onClick={() => setShowUnwork(true)} style={{ border: "none", background: "transparent", color: C.accent, cursor: "pointer", fontWeight: 600, fontSize: "inherit", padding: 0 }}>Show them</button></> : "Nothing matches this range and these filters."}
               </EmptyMon>
             ) : visible.slice(0, shown).map((r) => (
-              <LeadRowView key={r.contact_id} r={r} open={openId === r.contact_id} highlight={showUnwork} canEdit={!!r.owner_id && r.owner_id === acting} onToggle={onToggle} onOverride={onOverride} />
+              <LeadRowView key={r.contact_id} r={r} open={openId === r.contact_id} dq={showUnwork && isDq(r.wk, dq)} canEdit={!!r.owner_id && r.owner_id === acting} onToggle={onToggle} onOverride={onOverride} />
             ))}
           {visible.length > shown && (
             <button onClick={() => setShown(shown + 50)} style={{ ...btn(C.accent), margin: 10, width: "calc(100% - 20px)", justifyContent: "center" }}>
@@ -4677,7 +4733,8 @@ function AllLeadsTab() {
       <Expander id="leads-help" title="How workability is decided" defaultOpen={false}>
         <div style={{ fontSize: fs(g ? 12 : 10), color: C.faint, lineHeight: 1.7, display: "flex", flexDirection: "column", gap: 4 }}>
           <div>Leads: HubSpot contacts at lifecycle stage beyond Lead, marketable, not @motherduck.com, inbound only (no Apollo contacts, no Outbound-source deals, not "Outbound / Prospecting"). Lead date = HubSpot create date, in UTC.</div>
-          <div>Rules, first match wins. <b style={{ color: C.danger }}>Red</b>: agent or relay email domain (editable list in main.relay_domains); joined an existing MotherDuck org; created a new org while another org on the same work domain pays; non-technical role; not enough info. <b style={{ color: C.warn }}>Amber</b>: technical but no employer; role looks good but no MotherDuck user has this email. Everything else with a data or technical role is workable.</div>
+          <div>Reasons, first match wins. <b style={{ color: C.danger }}>Red by default</b>: agent or relay email domain (editable list in main.relay_domains); joined an existing MotherDuck org; new org while another org on the same work domain pays; unworkable title (students, hourly, retail and trades, clinicians: people who can't buy for a company); non-technical individual contributor who doesn't make buying decisions (AEs, SDRs, sales or customer engineers, recruiters); not enough info on a personal email. <b style={{ color: C.warn }}>Amber</b>: technical but no employer. <b style={{ color: C.ok }}>Workable</b>: data and technical roles, business decision makers at a real company (founders, heads of finance, sales, ops, strategy), and leads with no title or company but a business email (missing enrichment isn't a disqualifier).</div>
+          <div>Disqualify by picks which reasons count as unworkable here (highlighted or hidden). The Inbound tab's Unworkability filter can copy the same selection. A MotherDuck account is not required: event, content and form leads are workable.</div>
           <div>Role labels come from prompt_jev on job title, company, email domain and whether LinkedIn was found. They are judgments from a few fields: the confidence is shown, and the BDR owner can override one (saved in the terminal ledger like every other action). A lead is re-scored only when its title, company or email changes, so labels don't drift between runs.</div>
           <div>Scores refresh hourly via the bdr_lead_workability Flight ({WORK_FLIGHT_ID.slice(0, 8)}). Leads it hasn't reached yet show as "Pending", not workable.</div>
           <div style={{ marginTop: 4, color: C.muted, fontWeight: 600 }}>Known gaps</div>
@@ -4731,7 +4788,7 @@ export default function BdrTerminal() {
   UI.trainer = trainerOf(acting).color;
   const game = UI.game;
   const me = bdrName(acting);
-  const TABS: [string, string, string][] = [["feed", "▤ SIGNAL FEED", "INBOUND"], ["leads", "◇ ALL LEADS", "ALL LEADS"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
+  const TABS: [string, string, string][] = [["leads", "◇ ALL LEADS", "ALL LEADS"], ["feed", "▤ SIGNAL FEED", "INBOUND"], ["outbound", "◎ OUTBOUND", "OUTBOUND"], ["drafts", "✉ DRAFTS", "DRAFTS"], ["trainer", "◓ TRAINER", "TRAINER"], ["league", "♛ LEAGUE", "LEAGUE"]];
   const wrap: any = { background: game ? "transparent" : C.page, color: C.text };
   const rivet = (pos: any): any => ({ position: "absolute", width: 8, height: 8, borderRadius: 999, background: "#5fb3e6", boxShadow: "inset -1px -1px 0 #0a3550", ...pos });
   return (

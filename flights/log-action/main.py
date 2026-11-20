@@ -30,7 +30,7 @@ CONTACT_EVENTS = {
     "linkedin_request_sent", "linkedin_accepted", "linkedin_message", "linkedin_reply",
     "role_override",
 }
-ROLE_LABELS = {"icp", "tech_at_company", "tech_no_company", "non_technical", "unknown", "clear"}
+ROLE_LABELS = {"icp", "tech_at_company", "business_decision_maker", "non_technical", "unworkable_title", "tech_no_company", "unknown", "clear"}
 ACCOUNT_EVENTS = {"ae_assign"}
 PAYLOAD_KEYS = {"template_id", "subject", "body", "ai_subject", "ai_body", "edited", "opened_in_gmail", "cc", "flags"}
 
